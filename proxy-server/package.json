@@ -1,0 +1,16 @@
+{
+  "name": "ai-agent-proxy-server",
+  "version": "1.0.0",
+  "description": "A simple CORS proxy server for the autonomous AI agent.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.7.2",
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
+}

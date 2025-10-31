@@ -3,6 +3,7 @@ import { AgentStatus } from '../types';
 
 const ALL_STATUSES: AgentStatus[] = [
     'PLANNING',
+    'RESEARCHING',
     'PROPOSING',
     'CRITICIZING',
     'SYNTHESIZING',
@@ -13,6 +14,7 @@ const getStatusColor = (status: AgentStatus, isActive: boolean): string => {
     if (!isActive) return 'bg-gray-600';
     switch (status) {
         case 'PLANNING': return 'bg-sky-500';
+        case 'RESEARCHING': return 'bg-blue-500';
         case 'PROPOSING': return 'bg-yellow-500';
         case 'CRITICIZING': return 'bg-red-500';
         case 'SYNTHESIZING': return 'bg-emerald-500';

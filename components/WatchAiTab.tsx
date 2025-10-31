@@ -45,6 +45,8 @@ const getAuthorAppearance = (author: LogMessageAuthor) => {
         // MAS Agents
         case LogMessageAuthor.PLANNER:
             return { bg: 'bg-sky-900/50', text: 'text-sky-300', label: 'PLANNER' };
+        case LogMessageAuthor.RESEARCHER:
+            return { bg: 'bg-blue-900/50', text: 'text-blue-300', label: 'RESEARCHER' };
         case LogMessageAuthor.PROPOSER:
             return { bg: 'bg-gray-800', text: 'text-yellow-400', label: 'PROPOSER' };
         case LogMessageAuthor.CRITIC_CLARITY:
@@ -55,6 +57,8 @@ const getAuthorAppearance = (author: LogMessageAuthor) => {
             return { bg: 'bg-red-900/50', text: 'text-red-300', label: 'CRITIC (Security)' };
         case LogMessageAuthor.SYNTHESIZER:
             return { bg: 'bg-emerald-900/50', text: 'text-emerald-300', label: 'SYNTHESIZER' };
+        case LogMessageAuthor.NUDGER:
+            return { bg: 'bg-pink-900/50', text: 'text-pink-300', label: 'NUDGER' };
         default:
             return { bg: 'bg-gray-900', text: 'text-gray-400', label: 'UNKNOWN' };
     }
@@ -130,7 +134,7 @@ const LogEntry: React.FC<{ message: LogMessage, onNodeLinkClick: (nodeId: string
 const WatchAiTab: React.FC<WatchAiTabProps> = ({ log, onUserIntervention, agentStatus, tasks, resumeAgent, pauseAgent, onNodeLinkClick, actionStats }) => {
     const formRef = useRef<HTMLFormElement>(null);
     const logContainerRef = useRef<HTMLDivElement>(null);
-    const isRunning = agentStatus === 'RUNNING' || agentStatus === 'PLANNING' || agentStatus === 'PROPOSING' || agentStatus === 'CRITICIZING' || agentStatus === 'SYNTHESIZING' || agentStatus === 'EXECUTING';
+    const isRunning = agentStatus !== 'IDLE' && agentStatus !== 'PAUSED' && agentStatus !== 'ERROR';
 
 
     useEffect(() => {
@@ -150,14 +154,10 @@ const WatchAiTab: React.FC<WatchAiTabProps> = ({ log, onUserIntervention, agentS
     
     const getStatusIndicator = () => {
         const baseClasses = "px-3 py-1 text-sm font-semibold rounded-full";
+        if (isRunning) {
+            return <div className={`${baseClasses} bg-blue-500 text-white`}>Running</div>;
+        }
         switch (agentStatus) {
-            case 'RUNNING':
-            case 'PLANNING':
-            case 'PROPOSING':
-            case 'CRITICIZING':
-            case 'SYNTHESIZING':
-            case 'EXECUTING':
-                return <div className={`${baseClasses} bg-blue-500 text-white`}>Running</div>;
             case 'PAUSED':
                 return <div className={`${baseClasses} bg-yellow-500 text-gray-900`}>Paused</div>;
             case 'ERROR':

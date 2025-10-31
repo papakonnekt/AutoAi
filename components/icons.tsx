@@ -109,3 +109,9 @@ export const UsersIcon = ({ className }: { className?: string }) => (
         <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m-7.5-2.962A3.75 3.75 0 0 1 15 12a3.75 3.75 0 0 1 1.754-3.218m-2.218-3.541A1.5 1.5 0 0 0 11.25 6H10.5a1.5 1.5 0 0 0-1.5 1.5v.75a1.5 1.5 0 0 0 1.5 1.5h.75a1.5 1.5 0 0 0 1.5-1.5v-.75a1.5 1.5 0 0 0-1.5-1.5h-.75m-6.375 11.043a9 9 0 0 1 12.728 0m-12.728 0A9 9 0 0 1 3 18.72m0 0c0-.621.107-1.213.304-1.764M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
     </svg>
 );
+
+export const LightBulbIcon = ({ className }: { className?: string }) => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className={className}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-.189m-1.5.189a6.01 6.01 0 0 1-1.5-.189m3.75 7.478a12.06 12.06 0 0 1-4.5 0m3.75 2.311a7.5 7.5 0 0 1-7.5 0c-1.451 0-2.733-.802-3.468-2.004a7.451 7.451 0 0 1-1.03-3.956c0-1.858.584-3.593 1.57-5.048m11.354 0c.986 1.455 1.57 3.19 1.57 5.048 0 1.49-.344 2.936-1.03 3.956a7.451 7.451 0 0 1-3.468 2.004Z" />
+    </svg>
+);

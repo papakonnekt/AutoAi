@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import useLocalStorage from './hooks/useLocalStorage';
 import { LogMessage, LogMessageAuthor, AIMode, UpgradeNode, AgentStatus, LearnedMemory, LearnedMemoryType, ProposedChange, CriticFeedback, CriticRole } from './types';
-import { runProposerAgent, runPlannerAgent, runCriticAgent, runSynthesizerAgent } from './services/geminiService';
+import { runProposerAgent, runPlannerAgent, runCriticAgent, runSynthesizerAgent, runResearcherAgent, runNudgerAgent } from './services/geminiService';
 import { quotaManager } from './services/quotaManager';
 import WatchAiTab from './components/WatchAiTab';
 import WebGraphTab from './components/WebGraphTab';
@@ -37,6 +37,7 @@ const ALL_FILES = [
     '/services/geminiService.ts',
     '/services/quotaManager.ts',
     '/types.ts',
+    '/prompts.ts',
     '/globalMemories.json',
     '/upgrades.md'
 ];
@@ -65,7 +66,12 @@ const App: React.FC = () => {
     const [proposedChange, setProposedChange] = useLocalStorage<ProposedChange | null>('ai-mas-proposal', null);
     const [criticFeedbacks, setCriticFeedbacks] = useLocalStorage<CriticFeedback[]>('ai-mas-criticisms', []);
     const [synthesizerRejection, setSynthesizerRejection] = useLocalStorage<string | null>('ai-mas-rejection', null);
-    
+    const [isCriticEnabled, setIsCriticEnabled] = useLocalStorage('ai-mas-critic-enabled', true);
+    const [isResearcherEnabled, setIsResearcherEnabled] = useLocalStorage('ai-mas-researcher-enabled', true);
+    const [isNudgerEnabled, setIsNudgerEnabled] = useLocalStorage('ai-mas-nudger-enabled', true);
+    const [mainLoopCycle, setMainLoopCycle] = useLocalStorage('ai-main-loop-cycle', 0);
+    const [agentApiKeys, setAgentApiKeys] = useLocalStorage<{ [key: string]: string }>('ai-mas-apikeys', {});
+
     const agentLoopTimeout = useRef<number | null>(null);
 
     // Create refs to hold the latest state for use in callbacks, avoiding stale closures.
@@ -104,7 +110,7 @@ const App: React.FC = () => {
         }]);
     }, [setLearnedMemories, upgradeNodes.length]);
 
-    const executeAction = useCallback((action: string, thought: string): {shouldContinue: boolean, longPause: boolean} => {
+    const executeAction = useCallback(async (action: string, thought: string): Promise<{shouldContinue: boolean, longPause: boolean}> => {
         const rewriteMatch = action.match(/^REWRITE_CODE\s+"([^"]+)"\s*```(?:typescript|javascript|markdown)?\n([\sS]*?)\n```/);
         const saveMatch = action.match(/^SAVE_FILE\s+"([^"]+)"\s*```(?:typescript|javascript|markdown)?\n([\sS]*?)\n```/);
         const appendMatch = action.match(/^APPEND_TO_FILE\s+"([^"]+)"\s*```\n([\sS]*?)\n```/);
@@ -115,6 +121,7 @@ const App: React.FC = () => {
         const healthCheckMatch = action.startsWith('CHECK_PREVIEW_HEALTH');
         const listMatch = action.startsWith('LIST_FILES');
         const searchMatch = action.startsWith('GOOGLE_SEARCH');
+        const suggestTaskMatch = action.match(/^SUGGEST_TASK\s+"([^"]+)"/);
 
         // Any action other than READ_FILE should clear the focus
         if (!readMatch) {
@@ -363,9 +370,26 @@ const App: React.FC = () => {
              setConsecutiveSearches(prev => prev + 1);
              return { shouldContinue: true, longPause: false };
         } else if (readUrlMatch) {
-            addLogMessage(LogMessageAuthor.SYSTEM, `Action [READ_URL_CONTENT] acknowledged. This action requires a server-side proxy to bypass browser security (CORS) and is not implemented in this environment. The agent has been informed it cannot fetch the URL content directly.`);
-            logLearnedMemory('INSIGHT', `READ_URL_CONTENT on "${readUrlMatch[1]}"`, 'Action failed.', 'Direct URL fetching from the browser is blocked by CORS. A server proxy is needed, which is not available.');
-            return { shouldContinue: true, longPause: false };
+            const urlToFetch = readUrlMatch[1];
+            setCurrentTask(`Reading content from ${urlToFetch}...`);
+            try {
+                const proxyUrl = `http://localhost:3001/proxy?url=${encodeURIComponent(urlToFetch)}`;
+                const response = await fetch(proxyUrl);
+                if (!response.ok) {
+                    throw new Error(`Proxy server returned status ${response.status}`);
+                }
+                const content = await response.text();
+                // Sanitize and truncate content to avoid huge log messages
+                const summarizedContent = content.substring(0, 3000).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+                addLogMessage(LogMessageAuthor.SYSTEM, `Successfully read content from URL ${urlToFetch}:\n\`\`\`\n${summarizedContent}...\n\`\`\``);
+                logLearnedMemory('SUCCESS', `READ_URL_CONTENT on "${urlToFetch}"`, 'Successfully fetched and summarized URL content via local proxy.', 'The local proxy server enables web access for research.');
+                return { shouldContinue: true, longPause: false };
+            } catch (error: any) {
+                const errorMsg = `Action [READ_URL_CONTENT] failed. Could not fetch URL via proxy. Is the proxy server running? Error: ${error.message}`;
+                addLogMessage(LogMessageAuthor.SYSTEM, errorMsg);
+                logLearnedMemory('ERROR', `READ_URL_CONTENT on "${urlToFetch}"`, 'Action failed.', 'The proxy server might be down or the URL may be invalid. Ensure the proxy is running via `npm start` in the `proxy-server` directory.');
+                return { shouldContinue: true, longPause: false };
+            }
         } else if (healthCheckMatch) {
             if (previewError) {
                 addLogMessage(LogMessageAuthor.SYSTEM, `Preview health check: FAILED. Error: ${previewError}`);
@@ -375,6 +399,16 @@ const App: React.FC = () => {
                 addLogMessage(LogMessageAuthor.SYSTEM, 'Preview health check: OK.');
                 logLearnedMemory('SUCCESS', 'CHECK_PREVIEW_HEALTH', 'Preview is running correctly.', 'The current codebase is stable and does not crash the preview environment.');
             }
+            return { shouldContinue: true, longPause: false };
+        } else if (suggestTaskMatch) {
+            const task = suggestTaskMatch[1];
+            addLogMessage(LogMessageAuthor.SYSTEM, `Nudger suggested a new task: "${task}". Adding to plan.`);
+            setVirtualFileSystem(prev => {
+                const newVfs = { ...prev };
+                const plan = newVfs['/agent/plan.md'] || '# AGENT\'S PLAN\n\n';
+                newVfs['/agent/plan.md'] = plan + `\n- [ ] **[NUDGE]** ${task}`;
+                return newVfs;
+            });
             return { shouldContinue: true, longPause: false };
         } else {
             addLogMessage(LogMessageAuthor.SYSTEM, `Unknown or malformed action: ${action}`);
@@ -399,11 +433,26 @@ const App: React.FC = () => {
         try {
             switch (agentStatusRef.current) {
                 case 'PLANNING': {
+                    if (isNudgerEnabled && mainLoopCycle > 0 && mainLoopCycle % 5 === 0) {
+                        setCurrentTask('Nudger: Thinking of a creative suggestion...');
+                        const currentPlan = vfsRef.current['/agent/plan.md'] || "";
+                        const nudgerApiKey = agentApiKeys['NUDGER'] || apiKey;
+                        const response = await runNudgerAgent(nudgerApiKey, aiMode, currentPlan);
+                        const text = response.text;
+                        const thoughtMatch = text.match(/\[THOUGHT\]\s*([\s\S]*?)\s*\[\/THOUGHT\]/);
+                        const actionMatch = text.match(/\[ACTION\]\s*([\s\S]*?)(?:\[\/ACTION\]|$)/);
+                        addLogMessage(LogMessageAuthor.NUDGER, thoughtMatch ? thoughtMatch[1].trim() : "No thought found.");
+                        if (actionMatch) {
+                            await executeAction(actionMatch[1].trim(), thoughtMatch ? thoughtMatch[1].trim() : "");
+                        }
+                    }
+
                     setCurrentTask('Planner: Analyzing goals and creating a new plan...');
-                    const coreDirective = vfsRef.current['/services/geminiService.ts'];
+                    const coreDirective = vfsRef.current['/upgrades.md'];
                     const currentPlan = vfsRef.current['/agent/plan.md'] || "No plan file found.";
+                    const plannerApiKey = agentApiKeys['PLANNER'] || apiKey;
                     
-                    const response = await runPlannerAgent(apiKey, aiMode, logRef.current.slice(0, 50), learnedMemoriesRef.current, currentPlan, coreDirective);
+                    const response = await runPlannerAgent(plannerApiKey, aiMode, logRef.current.slice(0, 50), learnedMemoriesRef.current, currentPlan, coreDirective);
                     
                     const text = response.text;
                     const thoughtMatch = text.match(/\[THOUGHT\]\s*([\s\S]*?)\s*\[\/THOUGHT\]/);
@@ -413,11 +462,48 @@ const App: React.FC = () => {
                     
                     if (actionMatch) {
                         const action = actionMatch[1].trim();
-                        executeAction(action, thoughtMatch ? thoughtMatch[1].trim() : "");
-                        setAgentStatus('PROPOSING');
+                        await executeAction(action, thoughtMatch ? thoughtMatch[1].trim() : "");
+                        
+                        const updatedPlan = vfsRef.current['/agent/plan.md'] || "";
+                        const researchTask = updatedPlan.split('\n').find(line => line.includes('[NEEDS_RESEARCH]') && !line.includes('[x]'));
+                        
+                        if (isResearcherEnabled && researchTask) {
+                            setAgentStatus('RESEARCHING');
+                        } else {
+                            setAgentStatus('PROPOSING');
+                        }
                     } else {
                         addLogMessage(LogMessageAuthor.SYSTEM, "Planner did not provide a valid action. Pausing.");
                         setAgentStatus('PAUSED');
+                    }
+                    break;
+                }
+                
+                case 'RESEARCHING': {
+                    const currentPlan = vfsRef.current['/agent/plan.md'] || "";
+                    const researchTask = currentPlan.split('\n').find(line => line.includes('[NEEDS_RESEARCH]') && !line.includes('[x]'));
+                    if (!researchTask) {
+                         addLogMessage(LogMessageAuthor.SYSTEM, "No research task found. Skipping to proposing.");
+                         setAgentStatus('PROPOSING');
+                         break;
+                    }
+                    
+                    setCurrentTask(`Researcher: Researching "${researchTask.substring(0, 50)}..."`);
+                    const researcherApiKey = agentApiKeys['RESEARCHER'] || apiKey;
+                    const response = await runResearcherAgent(researcherApiKey, aiMode, researchTask, logRef.current.slice(0, 20));
+                    const text = response.text;
+                    const thoughtMatch = text.match(/\[THOUGHT\]\s*([\s\S]*?)\s*\[\/THOUGHT\]/);
+                    const actionMatch = text.match(/\[ACTION\]\s*([\s\S]*?)(?:\[\/ACTION\]|$)/);
+                    addLogMessage(LogMessageAuthor.RESEARCHER, thoughtMatch ? thoughtMatch[1].trim() : "No thought found.", response.candidates?.[0]?.groundingMetadata);
+
+                    const action = actionMatch ? actionMatch[1].trim() : 'TASK_COMPLETED';
+                    if (action === 'TASK_COMPLETED') {
+                        addLogMessage(LogMessageAuthor.SYSTEM, "Research complete. Moving to proposal phase.");
+                        setAgentStatus('PROPOSING');
+                    } else {
+                        addLogMessage(LogMessageAuthor.ACTION, action);
+                        await executeAction(action, thoughtMatch ? thoughtMatch[1].trim() : "");
+                        setAgentStatus('RESEARCHING'); // Loop until research is done
                     }
                     break;
                 }
@@ -425,8 +511,9 @@ const App: React.FC = () => {
                 case 'PROPOSING': {
                     setCurrentTask('Proposer: Developing a code change for the current task...');
                     const currentPlan = vfsRef.current['/agent/plan.md'] || "";
+                    const proposerApiKey = agentApiKeys['PROPOSER'] || apiKey;
                     
-                    const response = await runProposerAgent(apiKey, aiMode, logRef.current.slice(0, 100), learnedMemoriesRef.current, consecutiveSearches, currentPlan, synthesizerRejection);
+                    const response = await runProposerAgent(proposerApiKey, aiMode, logRef.current.slice(0, 100), learnedMemoriesRef.current, consecutiveSearches, currentPlan, synthesizerRejection);
                     
                     setSynthesizerRejection(null); // Clear rejection feedback after using it
                     const text = response.text;
@@ -440,7 +527,7 @@ const App: React.FC = () => {
                          // Check for non-code actions that can be executed immediately
                         if (!action.startsWith('REWRITE_CODE') && !action.startsWith('SAVE_FILE') && !action.startsWith('APPEND_TO_FILE')) {
                              addLogMessage(LogMessageAuthor.ACTION, action);
-                             const { shouldContinue } = executeAction(action, thoughtMatch ? thoughtMatch[1].trim() : "");
+                             const { shouldContinue } = await executeAction(action, thoughtMatch ? thoughtMatch[1].trim() : "");
                              if (shouldContinue) setAgentStatus('PROPOSING'); // Loop back to propose next step
                              else setAgentStatus('PAUSED');
                         } else {
@@ -453,7 +540,7 @@ const App: React.FC = () => {
                                     filePath: rewriteMatch[2],
                                     newCode: rewriteMatch[3].trim()
                                 });
-                                setAgentStatus('CRITICIZING');
+                                setAgentStatus(isCriticEnabled ? 'CRITICIZING' : 'EXECUTING');
                             } else {
                                 addLogMessage(LogMessageAuthor.SYSTEM, "Proposer submitted a malformed code action. Pausing.");
                                 setAgentStatus('PAUSED');
@@ -473,8 +560,9 @@ const App: React.FC = () => {
                         return;
                     }
                     setCurrentTask('Critic Team: Reviewing proposed code change...');
+                    const criticApiKey = agentApiKeys['CRITIC'] || apiKey;
                     const roles: CriticRole[] = ['Security', 'Efficiency', 'Clarity'];
-                    const criticismPromises = roles.map(role => runCriticAgent(apiKey, aiMode, role, proposedChange.action));
+                    const criticismPromises = roles.map(role => runCriticAgent(criticApiKey, aiMode, role, proposedChange.action));
 
                     const results = await Promise.all(criticismPromises);
                     
@@ -504,8 +592,9 @@ const App: React.FC = () => {
                         return;
                     }
                     setCurrentTask('Synthesizer: Analyzing feedback and making a final decision...');
+                    const synthesizerApiKey = agentApiKeys['SYNTHESIZER'] || apiKey;
                     
-                    const response = await runSynthesizerAgent(apiKey, aiMode, proposedChange.action, criticFeedbacks);
+                    const response = await runSynthesizerAgent(synthesizerApiKey, aiMode, proposedChange.action, criticFeedbacks);
                     const text = response.text;
                     
                     const decisionMatch = text.match(/\[DECISION\]\s*(APPROVE|REJECT)\s*\[\/DECISION\]/);
@@ -535,12 +624,13 @@ const App: React.FC = () => {
                     }
                     setCurrentTask('System: Executing approved code change...');
                     addLogMessage(LogMessageAuthor.ACTION, proposedChange.action);
-                    executeAction(proposedChange.action, proposedChange.thought);
+                    await executeAction(proposedChange.action, proposedChange.thought);
                     
                     // Cleanup MAS state for next cycle
                     setProposedChange(null);
                     setCriticFeedbacks([]);
-
+                    
+                    setMainLoopCycle(prev => prev + 1);
                     setAgentStatus('PLANNING'); // Start the next cycle
                     break;
                 }
@@ -553,7 +643,7 @@ const App: React.FC = () => {
             setAgentStatus('ERROR');
             setCurrentTask(`Agent paused due to an API error.`);
         }
-    }, [aiMode, apiKey, addLogMessage, consecutiveSearches, executeAction, logLearnedMemory, setCurrentTasks, proposedChange, criticFeedbacks, synthesizerRejection, setSynthesizerRejection]);
+    }, [aiMode, apiKey, addLogMessage, consecutiveSearches, executeAction, logLearnedMemory, setCurrentTasks, proposedChange, criticFeedbacks, synthesizerRejection, setSynthesizerRejection, isCriticEnabled, isNudgerEnabled, isResearcherEnabled, mainLoopCycle, setMainLoopCycle, agentApiKeys]);
     
     useEffect(() => {
         if (!['IDLE', 'PAUSED', 'ERROR'].includes(agentStatus)) {
@@ -737,7 +827,16 @@ Phase 1: Self-Awareness & Core Improvement
             case 'preview':
                  return <LivePreviewTab virtualFileSystem={virtualFileSystem} />;
             case 'mas':
-                 return <MultiAgentTab />;
+                 return <MultiAgentTab 
+                            isCriticEnabled={isCriticEnabled}
+                            setIsCriticEnabled={setIsCriticEnabled}
+                            isResearcherEnabled={isResearcherEnabled}
+                            setIsResearcherEnabled={setIsResearcherEnabled}
+                            isNudgerEnabled={isNudgerEnabled}
+                            setIsNudgerEnabled={setIsNudgerEnabled}
+                            agentApiKeys={agentApiKeys}
+                            setAgentApiKeys={setAgentApiKeys}
+                        />;
             case 'tutorials':
                  return <TutorialsTab />;
             case 'settings':

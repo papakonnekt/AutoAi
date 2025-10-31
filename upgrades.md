@@ -4,18 +4,7 @@ Goal: Establish the agent's fundamental tools for interacting with the world and
 
 [COMPLETED] 1. Implement Proxy-Based Web Access
 Feature: Create the [ACTION] READ_URL_CONTENT "https://..." tool.
-
-Implementation:
-
-Create a local proxy server (e.g., proxy-server.js) using Node.js, Express, node-fetch, and cors.
-
-This server will run on a separate port (e.g., 3001). It must accept a ?url= query parameter.
-
-The server fetches the content from the target URL and returns the raw text.
-
-In App.tsx, modify executeAction to handle READ_URL_CONTENT. This action will fetch the local proxy (http://localhost:3001/proxy?url=...).
-
-Log the returned text to the [SYSTEM] log for the agent to read.
+Implementation Note: This feature is enabled via a local Node.js proxy server located in the `/proxy-server` directory. The user must run `npm install` and `npm start` in that directory for the `READ_URL_CONTENT` action to function correctly. The agent's code has been updated to use this proxy at `http://localhost:3001`.
 
 [COMPLETED] 2. Implement Runtime Health Check
 Feature: Create the [ACTION] CHECK_PREVIEW_HEALTH tool.

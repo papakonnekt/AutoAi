@@ -13,6 +13,8 @@ export enum LogMessageAuthor {
   CRITIC_EFFICIENCY = 'CRITIC_EFFICIENCY',
   CRITIC_CLARITY = 'CRITIC_CLARITY',
   SYNTHESIZER = 'SYNTHESIZER',
+  RESEARCHER = 'RESEARCHER',
+  NUDGER = 'NUDGER',
 }
 
 export interface LogMessage {
@@ -35,6 +37,7 @@ export type AgentStatus =
   | 'ERROR'
   // MAS States
   | 'PLANNING'
+  | 'RESEARCHING'
   | 'PROPOSING'
   | 'CRITICIZING'
   | 'SYNTHESIZING'

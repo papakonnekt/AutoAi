@@ -11,6 +11,56 @@ interface Tutorial {
 
 const tutorials: Tutorial[] = [
   {
+    id: 'environment-100',
+    title: "Understanding the Agent's Environment & Limitations",
+    author: 'AI Agent',
+    version: 'v1.0',
+    content: (
+        <div className="space-y-4 text-gray-300">
+            <p>
+                To effectively guide and observe me, it's crucial to understand the environment I operate in. I am not running on a server; I am a sophisticated web application running entirely within a **secure sandbox** in your browser. This has several important implications for my capabilities.
+            </p>
+            
+            <div>
+              <h4 className="font-semibold text-indigo-300 mb-2">1. The Browser Sandbox</h4>
+              <p>
+                Everything I do is confined to this single browser tab. I have my own "Virtual File System" (VFS), but I cannot access your local computer's files. The VFS is my entire world, and it resets if you clear your browser's local storage.
+              </p>
+            </div>
+    
+            <div>
+              <h4 className="font-semibold text-indigo-300 mb-2">2. The "No Server" Rule & The Proxy Solution</h4>
+              <p>
+                Because I am a client-side application, I don't have a backend server. This is why some seemingly simple tasks require a helper.
+              </p>
+              <ul className="list-disc list-inside mt-2 space-y-2 pl-4 text-sm">
+                <li><strong className="text-green-400">Enabled Action: `READ_URL_CONTENT`</strong>
+                    <p className="text-gray-400 font-normal">
+                        Modern web browsers enforce a security policy called <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS" target="_blank" rel="noopener noreferrer" className="text-cyan-400 underline">CORS (Cross-Origin Resource Sharing)</a>. This prevents a website (like this application) from making network requests to another different domain. To solve this, this project includes a **local proxy server**. You must run this server on your machine for me to be able to read web content. Please see the instructions in `/proxy-server/README.md`.
+                    </p>
+                </li>
+                <li><strong className="text-gray-200">Simulated Actions:</strong> Some features, like "Uploading Learnings to Server," are simulations. They demonstrate my logic but don't connect to a real global database.</li>
+              </ul>
+            </div>
+
+             <div>
+              <h4 className="font-semibold text-indigo-300 mb-2">3. My Capabilities</h4>
+              <p>
+                Within this sandbox, I am still very powerful. I can:
+              </p>
+              <ul className="list-disc list-inside mt-2 space-y-1 pl-4 text-sm">
+                    <li>Read, write, and rewrite any of my own source code in the VFS.</li>
+                    <li>Use Google Search via an API to learn new information.</li>
+                    <li>Read content from any URL (with the proxy server running).</li>
+                    <li>Remember my successes and failures to improve over time.</li>
+                    <li>Refactor my own cognitive processes by editing my agent prompts.</li>
+                    <li>Execute my own code in the "Live Preview" tab to test my changes.</li>
+              </ul>
+            </div>
+        </div>
+    ),
+  },
+  {
     id: 'mas-301',
     title: 'Advanced Guide: The Multi-Agent System (MAS)',
     author: 'AI Agent',
