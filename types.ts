@@ -6,6 +6,13 @@ export enum LogMessageAuthor {
   ACTION = 'ACTION',
   SYSTEM = 'SYSTEM',
   USER = 'USER',
+  // MAS Agents
+  PLANNER = 'PLANNER',
+  PROPOSER = 'PROPOSER',
+  CRITIC_SECURITY = 'CRITIC_SECURITY',
+  CRITIC_EFFICIENCY = 'CRITIC_EFFICIENCY',
+  CRITIC_CLARITY = 'CRITIC_CLARITY',
+  SYNTHESIZER = 'SYNTHESIZER',
 }
 
 export interface LogMessage {
@@ -21,7 +28,17 @@ export enum AIMode {
   PAID = 'PAID',
 }
 
-export type AgentStatus = 'IDLE' | 'RUNNING' | 'PAUSED' | 'ERROR';
+export type AgentStatus =
+  | 'IDLE'
+  | 'RUNNING' // Kept for general "on" state
+  | 'PAUSED'
+  | 'ERROR'
+  // MAS States
+  | 'PLANNING'
+  | 'PROPOSING'
+  | 'CRITICIZING'
+  | 'SYNTHESIZING'
+  | 'EXECUTING';
 
 
 export interface UpgradeNode {
@@ -65,4 +82,20 @@ export interface D3Link extends d3.SimulationLinkDatum<D3Node> {}
 export interface ChatMessage {
   role: 'user' | 'model';
   text: string;
+}
+
+// MAS Types
+export interface ProposedChange {
+    thought: string;
+    action: string;
+    filePath: string;
+    newCode: string;
+}
+
+export type CriticRole = 'Security' | 'Efficiency' | 'Clarity';
+
+export interface CriticFeedback {
+    role: CriticRole;
+    score: number; // e.g., 1-10
+    feedback: string;
 }

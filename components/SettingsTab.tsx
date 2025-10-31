@@ -1,26 +1,64 @@
 import React, { useState, useEffect } from 'react';
 import { AIMode } from '../types';
 import { validateApiKey } from '../services/geminiService';
+import { quotaManager } from '../services/quotaManager';
+import { QUOTA_LIMITS } from '../constants';
+
 
 interface SettingsTabProps {
   apiKey: string | null;
   setApiKey: (key: string | null) => void;
   aiMode: AIMode;
   setAiMode: (mode: AIMode) => void;
+  isAutonomous: boolean;
+  setIsAutonomous: (isAutonomous: boolean) => void;
 }
 
 type ValidationStatus = 'idle' | 'validating' | 'valid' | 'invalid';
 
-const SettingsTab: React.FC<SettingsTabProps> = ({ apiKey, setApiKey, aiMode, setAiMode }) => {
+const QuotaBar: React.FC<{
+    label: string;
+    value: number;
+    limit: number;
+}> = ({ label, value, limit }) => {
+    const percentage = limit === Infinity ? 0 : Math.min((value / limit) * 100, 100);
+    const isApproaching = percentage > 75;
+    const isExceeded = percentage >= 100;
+    let barColor = 'bg-indigo-500';
+    if(isExceeded) barColor = 'bg-red-500';
+    else if(isApproaching) barColor = 'bg-yellow-500';
+
+    return (
+        <div>
+            <div className="flex justify-between text-xs text-gray-400 mb-1">
+                <span>{label}</span>
+                <span>{value} / {limit === Infinity ? '∞' : limit}</span>
+            </div>
+            <div className="w-full bg-gray-700 rounded-full h-2.5">
+                <div className={`${barColor} h-2.5 rounded-full`} style={{ width: `${percentage}%` }}></div>
+            </div>
+        </div>
+    );
+};
+
+const SettingsTab: React.FC<SettingsTabProps> = ({ apiKey, setApiKey, aiMode, setAiMode, isAutonomous, setIsAutonomous }) => {
   const [keyInput, setKeyInput] = useState(apiKey || '');
   const [validationStatus, setValidationStatus] = useState<ValidationStatus>('idle');
   const [validationMessage, setValidationMessage] = useState<string>('');
+  const [usage, setUsage] = useState({ rpm: 0, tpm: 0, rpd: 0 });
 
   // Reset validation status if the user types a new key
   useEffect(() => {
     setValidationStatus('idle');
     setValidationMessage('');
   }, [keyInput]);
+
+  useEffect(() => {
+     const interval = setInterval(() => {
+        setUsage(quotaManager.getUsageStats());
+     }, 1000);
+     return () => clearInterval(interval);
+  }, []);
 
   const handleValidateKey = async () => {
     const trimmedKey = keyInput.trim();
@@ -68,6 +106,15 @@ const SettingsTab: React.FC<SettingsTabProps> = ({ apiKey, setApiKey, aiMode, se
     if (!apiKey) return;
     setAiMode(aiMode === AIMode.PAID ? AIMode.FREE : AIMode.PAID);
   };
+  
+  const handleResetState = () => {
+      if(window.confirm("Are you sure you want to reset all agent state? This will delete its memory, code versions, and virtual file system. This action cannot be undone.")) {
+          Object.keys(window.localStorage)
+              .filter(key => key.startsWith('ai-'))
+              .forEach(key => window.localStorage.removeItem(key));
+          window.location.reload();
+      }
+  };
 
   const getInputClasses = () => {
     const base = "flex-grow bg-gray-900 border rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors";
@@ -80,7 +127,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({ apiKey, setApiKey, aiMode, se
 
 
   return (
-    <div className="p-6 h-full flex flex-col gap-8 text-gray-300">
+    <div className="p-6 h-full flex flex-col gap-8 text-gray-300 overflow-y-auto">
       <h2 className="text-2xl font-bold text-white">Settings</h2>
 
       <div className="space-y-2">
@@ -118,7 +165,7 @@ const SettingsTab: React.FC<SettingsTabProps> = ({ apiKey, setApiKey, aiMode, se
       </div>
 
       <div className="space-y-4">
-        <h3 className="text-lg font-semibold text-white">Operational Mode</h3>
+        <h3 className="text-lg font-semibold text-white">Operational Controls</h3>
         <div className="bg-gray-850 p-4 rounded-lg flex items-center justify-between">
             <div>
                 <span className={`font-bold text-xl ${aiMode === AIMode.PAID ? 'text-green-400' : 'text-yellow-400'}`}>
@@ -126,8 +173,8 @@ const SettingsTab: React.FC<SettingsTabProps> = ({ apiKey, setApiKey, aiMode, se
                 </span>
                 <p className="text-sm text-gray-400 mt-1">
                     {aiMode === AIMode.FREE 
-                        ? "Uses a built-in, shared API with strict limits (2 RPM, 50 RPD)."
-                        : "Uses your API key. Limits are set high (60 RPM) for maximum reasoning."
+                        ? "Uses a built-in, shared API with strict limits."
+                        : "Uses your API key. Limits are set high for maximum reasoning."
                     }
                 </p>
             </div>
@@ -145,7 +192,56 @@ const SettingsTab: React.FC<SettingsTabProps> = ({ apiKey, setApiKey, aiMode, se
             />
           </button>
         </div>
+        {aiMode === AIMode.FREE && (
+             <div className="bg-gray-850 p-4 rounded-lg space-y-3">
+                <h4 className="text-sm font-semibold text-white">Free Mode Quota Usage (Last Minute)</h4>
+                <QuotaBar label="Requests (RPM)" value={usage.rpm} limit={QUOTA_LIMITS[AIMode.FREE].RPM} />
+                <QuotaBar label="Tokens (TPM)" value={usage.tpm} limit={QUOTA_LIMITS[AIMode.FREE].TPM} />
+                <QuotaBar label="Daily Requests (RPD)" value={usage.rpd} limit={QUOTA_LIMITS[AIMode.FREE].RPD} />
+             </div>
+        )}
         {!apiKey && <p className="text-sm text-yellow-500">You must save an API key to enable Paid Mode.</p>}
+
+         <div className="bg-gray-850 p-4 rounded-lg flex items-center justify-between">
+            <div>
+                <span className={`font-bold text-xl ${isAutonomous ? 'text-green-400' : 'text-yellow-400'}`}>
+                    Autonomous Mode
+                </span>
+                <p className="text-sm text-gray-400 mt-1">
+                   {isAutonomous ? "ON: Agent will start automatically on page load." : "OFF: Agent will wait for user to press Resume."}
+                </p>
+            </div>
+          <button
+            onClick={() => setIsAutonomous(!isAutonomous)}
+            className={`relative inline-flex items-center h-6 rounded-full w-11 transition-colors ${
+              isAutonomous ? 'bg-indigo-600' : 'bg-gray-600'
+            } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-900 focus:ring-indigo-500`}
+          >
+            <span
+              className={`inline-block w-4 h-4 transform bg-white rounded-full transition-transform ${
+                isAutonomous ? 'translate-x-6' : 'translate-x-1'
+              }`}
+            />
+          </button>
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <h3 className="text-lg font-semibold text-red-400">Danger Zone</h3>
+         <div className="bg-red-900/20 p-4 rounded-lg border border-red-700/50 flex items-center justify-between">
+            <div>
+                <p className="font-semibold text-white">Hard Reset Agent</p>
+                <p className="text-sm text-red-300 mt-1">
+                   This will permanently delete all of the agent's memories, code history, and files.
+                </p>
+            </div>
+            <button
+                onClick={handleResetState}
+                className="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md transition-colors"
+             >
+                Reset State
+            </button>
+        </div>
       </div>
     </div>
   );

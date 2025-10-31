@@ -122,6 +122,7 @@
                     console.log('[Preview] Boot process finished successfully.');
                 } catch (error) {
                     console.error('[Preview] Error during app execution:', error);
+                    window.parent.postMessage({ type: 'PREVIEW_ERROR', error: error.message }, '*');
                     const rootEl = document.getElementById('root');
                     if(rootEl) {
                         rootEl.innerHTML = `<div style="color: #fca5a5; padding: 20px; font-family: monospace; white-space: pre-wrap; font-size: 14px;">

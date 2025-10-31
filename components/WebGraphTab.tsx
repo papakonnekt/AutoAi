@@ -1,8 +1,8 @@
 // Fix: Import d3 to resolve all d3-related type and namespace errors.
 import * as d3 from 'd3';
-import React, { useEffect, useRef, useState, useMemo } from 'react';
+import React, { useEffect, useRef, useState, useMemo, useCallback } from 'react';
 import { UpgradeNode, D3Node, D3Link, LearnedMemory, LearnedMemoryType } from '../types';
-import { XIcon, DownloadIcon, UploadIcon, CloudDownloadIcon, CloudUploadIcon, FolderIcon, ChatBubbleIcon } from './icons';
+import { XIcon, DownloadIcon, UploadIcon, CloudDownloadIcon, CloudUploadIcon, FolderIcon, ChatBubbleIcon, ChevronDownIcon, ChevronUpIcon } from './icons';
 
 // --- Diff Generation Logic (from CodeDiffTab.tsx) ---
 interface DiffPart {
@@ -87,6 +87,130 @@ const getSymbol = (type: DiffPart['type']) => {
 };
 // --- End of Diff Logic ---
 
+// --- File Tree Component ---
+interface FileTreeNode {
+    name: string;
+    path: string;
+    children?: { [key: string]: FileTreeNode };
+}
+
+const buildFileTree = (filePaths: string[]): FileTreeNode => {
+    const root: FileTreeNode = { name: 'root', path: '/' };
+    filePaths.forEach(path => {
+        let currentNode = root;
+        const parts = path.split('/').filter(p => p);
+        parts.forEach((part, index) => {
+            if (!currentNode.children) {
+                currentNode.children = {};
+            }
+            if (!currentNode.children[part]) {
+                const currentPath = '/' + parts.slice(0, index + 1).join('/');
+                currentNode.children[part] = { name: part, path: currentPath };
+            }
+            currentNode = currentNode.children[part];
+        });
+    });
+    return root;
+};
+
+const FileTree: React.FC<{
+    files: { [key: string]: string };
+    onFileClick: (path: string) => void;
+    focusFile: string | null;
+    editCounts: { [key: string]: number };
+}> = ({ files, onFileClick, focusFile, editCounts }) => {
+    const [searchQuery, setSearchQuery] = useState('');
+    const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set(['/']));
+
+    const fileTree = useMemo(() => buildFileTree(Object.keys(files)), [files]);
+    const maxEdits = useMemo(() => Math.max(1, ...Object.values(editCounts)), [editCounts]);
+    
+    const toggleFolder = (path: string) => {
+        setExpandedFolders(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(path)) {
+                newSet.delete(path);
+            } else {
+                newSet.add(path);
+            }
+            return newSet;
+        });
+    };
+    
+    const getHeatmapColor = (count: number) => {
+        if (!count) return 'transparent';
+        const intensity = Math.min(count / maxEdits, 1);
+        // From blue (low) to red (high)
+        const r = Math.round(255 * intensity);
+        const b = Math.round(255 * (1 - intensity));
+        return `rgba(${r}, 50, ${b}, 0.2)`;
+    };
+    
+    const renderTree = (node: FileTreeNode, pathPrefix: string = ''): React.ReactNode[] => {
+        if (!node.children) return [];
+        return Object.values(node.children)
+            .sort((a, b) => {
+                const aIsFolder = !!a.children;
+                const bIsFolder = !!b.children;
+                if (aIsFolder !== bIsFolder) return aIsFolder ? -1 : 1;
+                return a.name.localeCompare(b.name);
+            })
+            .filter(child => !searchQuery || child.path.toLowerCase().includes(searchQuery.toLowerCase()))
+            .map(child => {
+                const isFolder = !!child.children;
+                const isExpanded = expandedFolders.has(child.path);
+                
+                const count = editCounts[child.path] || 0;
+                
+                if (isFolder) {
+                    return (
+                        <div key={child.path}>
+                            <div
+                                onClick={() => toggleFolder(child.path)}
+                                className="flex items-center gap-2 p-1 rounded-md hover:bg-gray-800/50 cursor-pointer"
+                                style={{ backgroundColor: getHeatmapColor(count) }}
+                            >
+                                {isExpanded ? <ChevronDownIcon className="w-4 h-4" /> : <ChevronUpIcon className="w-4 h-4" />}
+                                <FolderIcon className="w-5 h-5 text-indigo-400" />
+                                <span className="font-mono text-sm">{child.name}</span>
+                            </div>
+                            {isExpanded && <div className="pl-4 border-l border-gray-700 ml-2">{renderTree(child, `${pathPrefix}/${child.name}`)}</div>}
+                        </div>
+                    );
+                } else {
+                    return (
+                        <div key={child.path}
+                            onClick={() => onFileClick(child.path)}
+                            className={`flex items-center gap-2 p-1 rounded-md hover:bg-gray-800/50 cursor-pointer ${focusFile === child.path ? 'animate-pulse-glow' : ''}`}
+                            style={{ backgroundColor: getHeatmapColor(count) }}
+                        >
+                            <span className="w-4 h-4"></span> {/* Spacer */}
+                            <span className="font-mono text-sm text-gray-300">{child.name}</span>
+                        </div>
+                    );
+                }
+            });
+    };
+
+    return (
+        <div className="flex-grow flex flex-col gap-3 overflow-hidden">
+            <div className="flex-shrink-0">
+                <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search files..."
+                    className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                />
+            </div>
+            <div className="flex-grow bg-gray-900 rounded-lg border border-gray-800 overflow-y-auto p-2">
+                {renderTree(fileTree)}
+            </div>
+        </div>
+    );
+};
+// --- End of File Tree ---
+
 
 const getMemoryTypeAppearance = (type: LearnedMemoryType) => {
     switch(type) {
@@ -99,7 +223,6 @@ const getMemoryTypeAppearance = (type: LearnedMemoryType) => {
 
 const MEMORY_TYPES: (LearnedMemoryType | 'ALL')[] = ['ALL', 'SUCCESS', 'ERROR', 'INSIGHT'];
 
-// Fix: Added missing WebGraphTabProps interface definition.
 interface WebGraphTabProps {
   upgradeNodes: UpgradeNode[];
   virtualFileSystem: { [key: string]: string };
@@ -108,22 +231,50 @@ interface WebGraphTabProps {
   setVirtualFileSystem: React.Dispatch<React.SetStateAction<{ [key: string]: string }>>;
   setLearnedMemories: React.Dispatch<React.SetStateAction<LearnedMemory[]>>;
   logSystemMessage: (message: string) => void;
+  deepLinkNodeId: string | null;
+  clearDeepLink: () => void;
+  focusFile: string | null;
+  editCounts: { [key: string]: number };
 }
 
-const WebGraphTab: React.FC<WebGraphTabProps> = ({ upgradeNodes, virtualFileSystem, learnedMemories, setUpgradeNodes, setVirtualFileSystem, setLearnedMemories, logSystemMessage }) => {
+const WebGraphTab: React.FC<WebGraphTabProps> = ({ upgradeNodes, virtualFileSystem, learnedMemories, setUpgradeNodes, setVirtualFileSystem, setLearnedMemories, logSystemMessage, deepLinkNodeId, clearDeepLink, focusFile, editCounts }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedNode, setSelectedNode] = useState<UpgradeNode | null>(null);
   const [viewingFile, setViewingFile] = useState<{ path: string; content: string } | null>(null);
   const [activeRightTab, setActiveRightTab] = useState<'memories' | 'vfs'>('memories');
   
-  // State for memory filtering and sorting
   const [memoryFilter, setMemoryFilter] = useState<'ALL' | LearnedMemoryType>('ALL');
   const [memorySort, setMemorySort] = useState<'NEWEST' | 'OLDEST'>('NEWEST');
 
-  // State for VFS searching
-  const [vfsSearchQuery, setVfsSearchQuery] = useState('');
+  const nodeDiffSummaries = useMemo(() => {
+    const summaries: { [nodeId: string]: { added: number, removed: number } } = {};
+    upgradeNodes.forEach(node => {
+        if (node.version === 1) return;
+        const previousNode = upgradeNodes
+            .slice(0, node.version - 1)
+            .reverse()
+            .find(n => n.filePath === node.filePath);
+        if (previousNode) {
+            const diff = generateDiff(previousNode.code, node.code);
+            const summary = generateDiffSummary(diff);
+            if (summary) {
+                summaries[node.id] = summary;
+            }
+        }
+    });
+    return summaries;
+  }, [upgradeNodes]);
 
+  useEffect(() => {
+    if (deepLinkNodeId) {
+        const nodeToSelect = upgradeNodes.find(n => n.id === deepLinkNodeId);
+        if (nodeToSelect) {
+            setSelectedNode(nodeToSelect);
+        }
+        clearDeepLink();
+    }
+  }, [deepLinkNodeId, upgradeNodes, clearDeepLink]);
 
   useEffect(() => {
     if (!upgradeNodes.length || !svgRef.current) return;
@@ -145,8 +296,8 @@ const WebGraphTab: React.FC<WebGraphTabProps> = ({ upgradeNodes, virtualFileSyst
     }
 
     const simulation = d3.forceSimulation(nodes)
-      .force("link", d3.forceLink(links).id((d: any) => d.id).distance(100))
-      .force("charge", d3.forceManyBody().strength(-300))
+      .force("link", d3.forceLink(links).id((d: any) => d.id).distance(120))
+      .force("charge", d3.forceManyBody().strength(-400))
       .force("center", d3.forceCenter(width / 2, height / 2));
 
     const link = svg.append("g")
@@ -171,17 +322,37 @@ const WebGraphTab: React.FC<WebGraphTabProps> = ({ upgradeNodes, virtualFileSyst
       .call(drag(simulation) as any);
 
     node.append("circle")
-      .attr("r", 20)
+      .attr("r", 25)
       .attr("fill", (d, i) => i === nodes.length - 1 ? "#a78bfa" : "#6366f1")
       .attr("stroke", "#1e1b4b")
       .attr("stroke-width", 2);
+      
+    const textGroup = node.append("text")
+        .attr("text-anchor", "middle")
+        .style("font-size", "10px")
+        .style("fill", "white")
+        .style("pointer-events", "none");
 
-    node.append("text")
-      .attr("dy", "0.35em")
-      .attr("text-anchor", "middle")
-      .style("font-size", "12px")
-      .style("fill", "white")
-      .text(d => `v${d.version}`);
+    textGroup.append("tspan")
+        .attr("dy", "-0.3em")
+        .text(d => `v${d.version}`);
+
+    textGroup.each(function(d) {
+        const summary = nodeDiffSummaries[d.id];
+        if (summary) {
+            const g = d3.select(this);
+            g.append("tspan")
+                .attr("x", 0)
+                .attr("dy", "1.2em")
+                .style("fill", "#6ee7b7")
+                .text(`+${summary.added}`);
+            g.append("tspan")
+                .attr("dx", "0.5em")
+                .style("fill", "#fca5a5")
+                .text(`-${summary.removed}`);
+        }
+    });
+
 
     simulation.on("tick", () => {
       link
@@ -218,7 +389,7 @@ const WebGraphTab: React.FC<WebGraphTabProps> = ({ upgradeNodes, virtualFileSyst
     }
 
 
-  }, [upgradeNodes]);
+  }, [upgradeNodes, nodeDiffSummaries]);
   
   const { diffResult, diffSummary } = useMemo(() => {
     if (!selectedNode || selectedNode.version === 1) return { diffResult: null, diffSummary: null };
@@ -245,13 +416,6 @@ const WebGraphTab: React.FC<WebGraphTabProps> = ({ upgradeNodes, virtualFileSyst
             }
         });
   }, [learnedMemories, memoryFilter, memorySort]);
-
-  const filteredVfsFiles = useMemo(() => {
-    if (!vfsSearchQuery) return Object.keys(virtualFileSystem).sort();
-    return Object.keys(virtualFileSystem)
-        .filter(path => path.toLowerCase().includes(vfsSearchQuery.toLowerCase()))
-        .sort();
-  }, [virtualFileSystem, vfsSearchQuery]);
 
   const handleDownloadState = () => {
     const memoryData = {
@@ -449,36 +613,12 @@ const WebGraphTab: React.FC<WebGraphTabProps> = ({ upgradeNodes, virtualFileSyst
             )}
 
             {activeRightTab === 'vfs' && (
-                <div className="flex-grow flex flex-col gap-3 overflow-hidden">
-                    <div className="flex-shrink-0">
-                        <input
-                            type="text"
-                            value={vfsSearchQuery}
-                            onChange={(e) => setVfsSearchQuery(e.target.value)}
-                            placeholder="Search files..."
-                            className="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                        />
-                    </div>
-                    <div className="flex-grow bg-gray-900 rounded-lg border border-gray-800 overflow-y-auto p-2">
-                        {filteredVfsFiles.length > 0 ? (
-                           <div className="space-y-1">
-                                {filteredVfsFiles.map(path => (
-                                    <button
-                                        key={path}
-                                        onClick={() => setViewingFile({ path, content: virtualFileSystem[path] })}
-                                        className="w-full text-left p-2 rounded-md hover:bg-gray-800/50 font-mono text-sm text-gray-300 transition-colors"
-                                    >
-                                        {path}
-                                    </button>
-                                ))}
-                            </div>
-                        ) : (
-                            <div className="h-full flex items-center justify-center">
-                                <p className="text-gray-400">No files found.</p>
-                            </div>
-                        )}
-                    </div>
-                </div>
+                <FileTree
+                    files={virtualFileSystem}
+                    onFileClick={(path) => setViewingFile({ path, content: virtualFileSystem[path] })}
+                    focusFile={focusFile}
+                    editCounts={editCounts}
+                />
             )}
         </div>
       </div>

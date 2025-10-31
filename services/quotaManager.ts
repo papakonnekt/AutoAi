@@ -1,4 +1,3 @@
-
 import { AIMode } from '../types';
 import { QUOTA_LIMITS } from '../constants';
 
@@ -45,6 +44,23 @@ class QuotaManager {
     // Clean up old history to prevent memory leak
     const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
     this.callHistory = this.callHistory.filter(call => call.timestamp > oneDayAgo);
+  }
+
+  public getUsageStats(): { rpm: number; tpm: number; rpd: number } {
+    const now = Date.now();
+    const oneMinuteAgo = now - 60 * 1000;
+    const oneDayAgo = now - 24 * 60 * 60 * 1000;
+
+    const recentCalls = this.callHistory.filter(call => call.timestamp > oneMinuteAgo);
+    const dailyCalls = this.callHistory.filter(call => call.timestamp > oneDayAgo);
+    
+    const tokensInLastMinute = recentCalls.reduce((sum, call) => sum + call.tokens, 0);
+
+    return {
+        rpm: recentCalls.length,
+        tpm: tokensInLastMinute,
+        rpd: dailyCalls.length
+    };
   }
 }
 

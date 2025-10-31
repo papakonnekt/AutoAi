@@ -1,15 +1,36 @@
-import React, { useRef, useEffect } from 'react';
-import { LogMessage, LogMessageAuthor, AgentStatus } from '../types';
+import React, { useRef, useEffect, useMemo } from 'react';
+import { LogMessage, LogMessageAuthor, AgentStatus, LearnedMemory } from '../types';
 import { PlayIcon, StopIcon } from './icons';
 
 interface WatchAiTabProps {
   log: LogMessage[];
   onUserIntervention: (message: string) => void;
   agentStatus: AgentStatus;
-  currentTask: string;
-  startAgent: () => void;
-  stopAgent: () => void;
+  tasks: string[];
+  resumeAgent: () => void;
+  pauseAgent: () => void;
+  onNodeLinkClick: (nodeId: string) => void;
+  actionStats: { [key: string]: { success: number; error: number } };
 }
+
+const TaskListDisplay: React.FC<{ tasks: string[] }> = ({ tasks }) => {
+    if (!tasks || tasks.length === 0) {
+        return <span className="italic">No tasks assigned.</span>;
+    }
+    const primaryTask = tasks[0]?.replace(/\[(High|Medium|Low)\]\s*/, '').trim();
+    return (
+        <div className="flex items-center space-x-2 text-gray-400">
+            <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse"></div>
+            <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse [animation-delay:0.2s]"></div>
+            <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse [animation-delay:0.4s]"></div>
+             <div>
+                <span className="font-semibold text-gray-300 not-italic">Current Task: </span>
+                <span className="italic">{primaryTask}</span>
+            </div>
+        </div>
+    );
+};
+
 
 const getAuthorAppearance = (author: LogMessageAuthor) => {
     switch(author) {
@@ -21,18 +42,31 @@ const getAuthorAppearance = (author: LogMessageAuthor) => {
             return { bg: 'bg-gray-850', text: 'text-purple-400', label: 'SYSTEM' };
         case LogMessageAuthor.USER:
             return { bg: 'bg-green-900/50', text: 'text-green-400', label: 'USER' };
+        // MAS Agents
+        case LogMessageAuthor.PLANNER:
+            return { bg: 'bg-sky-900/50', text: 'text-sky-300', label: 'PLANNER' };
+        case LogMessageAuthor.PROPOSER:
+            return { bg: 'bg-gray-800', text: 'text-yellow-400', label: 'PROPOSER' };
+        case LogMessageAuthor.CRITIC_CLARITY:
+            return { bg: 'bg-orange-900/50', text: 'text-orange-300', label: 'CRITIC (Clarity)' };
+        case LogMessageAuthor.CRITIC_EFFICIENCY:
+            return { bg: 'bg-rose-900/50', text: 'text-rose-300', label: 'CRITIC (Efficiency)' };
+        case LogMessageAuthor.CRITIC_SECURITY:
+            return { bg: 'bg-red-900/50', text: 'text-red-300', label: 'CRITIC (Security)' };
+        case LogMessageAuthor.SYNTHESIZER:
+            return { bg: 'bg-emerald-900/50', text: 'text-emerald-300', label: 'SYNTHESIZER' };
         default:
             return { bg: 'bg-gray-900', text: 'text-gray-400', label: 'UNKNOWN' };
     }
 }
 
-const LogEntry: React.FC<{ message: LogMessage }> = ({ message }) => {
+const LogEntry: React.FC<{ message: LogMessage, onNodeLinkClick: (nodeId: string) => void }> = ({ message, onNodeLinkClick }) => {
     const { bg, text, label } = getAuthorAppearance(message.author);
 
     const formatContent = (content: string) => {
         if (message.author === LogMessageAuthor.ACTION) {
             if (content.startsWith('REWRITE_CODE')) {
-                const code = content.substring(content.indexOf('```typescript'), content.lastIndexOf('```') + 3);
+                const code = content.substring(content.indexOf('```'), content.lastIndexOf('```') + 3);
                 return (
                     <>
                         <span className="font-semibold">REWRITE_CODE</span>
@@ -45,6 +79,17 @@ const LogEntry: React.FC<{ message: LogMessage }> = ({ message }) => {
                 return <><span className="font-semibold">GOOGLE_SEARCH</span> <code className="bg-gray-950 p-1 rounded text-cyan-300">{query}</code></>;
             }
         }
+        
+        if (message.author === LogMessageAuthor.SYSTEM && content.includes('System automatically updated to v')) {
+            const parts = content.split(/(v\d+)/);
+            return parts.map((part, index) => {
+                if (/^v\d+$/.test(part)) {
+                    return <button key={index} onClick={() => onNodeLinkClick(part)} className="font-bold text-indigo-400 hover:underline">{part}</button>
+                }
+                return part;
+            })
+        }
+        
         return content;
     };
     
@@ -82,10 +127,11 @@ const LogEntry: React.FC<{ message: LogMessage }> = ({ message }) => {
 };
 
 
-const WatchAiTab: React.FC<WatchAiTabProps> = ({ log, onUserIntervention, agentStatus, currentTask, startAgent, stopAgent }) => {
+const WatchAiTab: React.FC<WatchAiTabProps> = ({ log, onUserIntervention, agentStatus, tasks, resumeAgent, pauseAgent, onNodeLinkClick, actionStats }) => {
     const formRef = useRef<HTMLFormElement>(null);
     const logContainerRef = useRef<HTMLDivElement>(null);
-    const isRunning = agentStatus === 'RUNNING';
+    const isRunning = agentStatus === 'RUNNING' || agentStatus === 'PLANNING' || agentStatus === 'PROPOSING' || agentStatus === 'CRITICIZING' || agentStatus === 'SYNTHESIZING' || agentStatus === 'EXECUTING';
+
 
     useEffect(() => {
         if (logContainerRef.current) {
@@ -106,6 +152,11 @@ const WatchAiTab: React.FC<WatchAiTabProps> = ({ log, onUserIntervention, agentS
         const baseClasses = "px-3 py-1 text-sm font-semibold rounded-full";
         switch (agentStatus) {
             case 'RUNNING':
+            case 'PLANNING':
+            case 'PROPOSING':
+            case 'CRITICIZING':
+            case 'SYNTHESIZING':
+            case 'EXECUTING':
                 return <div className={`${baseClasses} bg-blue-500 text-white`}>Running</div>;
             case 'PAUSED':
                 return <div className={`${baseClasses} bg-yellow-500 text-gray-900`}>Paused</div>;
@@ -124,42 +175,55 @@ const WatchAiTab: React.FC<WatchAiTabProps> = ({ log, onUserIntervention, agentS
                 <h2 className="text-2xl font-bold text-white">Watch AI</h2>
             </div>
             
-            <div className="mb-4 p-3 bg-gray-900 rounded-lg border border-gray-800 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                    {getStatusIndicator()}
-                    <div className="text-gray-400 text-sm">
-                       {isRunning ? (
-                         <div className="flex items-center space-x-2 text-gray-400">
-                            <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse"></div>
-                            <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse [animation-delay:0.2s]"></div>
-                            <div className="w-2 h-2 bg-indigo-400 rounded-full animate-pulse [animation-delay:0.4s]"></div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+                <div className="lg:col-span-2 p-3 bg-gray-900 rounded-lg border border-gray-800 flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                        {getStatusIndicator()}
+                        <div className="text-gray-400 text-sm">
+                           {isRunning ? (
+                             <TaskListDisplay tasks={tasks} />
+                           ) : (
                              <div>
-                                <span className="font-semibold text-gray-300 not-italic">Current Task: </span>
-                                <span className="italic">{currentTask}</span>
+                                <span className="font-semibold text-gray-300 not-italic">Status: </span>
+                                <span className="italic">{agentStatus === 'PAUSED' ? 'Agent is paused. Press Resume to continue.' : agentStatus === 'IDLE' ? 'Agent is idle. Press Resume to start.' : 'Agent has stopped due to an error.'}</span>
                             </div>
+                           )}
                         </div>
-                       ) : (
-                         <div>
-                            <span className="font-semibold text-gray-300 not-italic">Status: </span>
-                            <span className="italic">{currentTask}</span>
-                        </div>
-                       )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                         <button onClick={resumeAgent} disabled={isRunning} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                            <PlayIcon className="w-5 h-5" />
+                            Resume
+                        </button>
+                        <button onClick={pauseAgent} disabled={!isRunning} className="flex items-center gap-2 bg-red-600 hover:red-700 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                            <StopIcon className="w-5 h-5" />
+                            Pause
+                        </button>
                     </div>
                 </div>
-                <div className="flex items-center gap-2">
-                     <button onClick={startAgent} disabled={isRunning} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                        <PlayIcon className="w-5 h-5" />
-                        Start
-                    </button>
-                    <button onClick={stopAgent} disabled={!isRunning} className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-                        <StopIcon className="w-5 h-5" />
-                        Stop
-                    </button>
+                 <div className="p-3 bg-gray-900 rounded-lg border border-gray-800">
+                    <h3 className="text-sm font-semibold text-white mb-2">Action Success Rate</h3>
+                    <div className="text-xs space-y-1 overflow-y-auto max-h-24">
+                        {Object.keys(actionStats).length > 0 ? Object.entries(actionStats).map(([action, stats]) => {
+                            const total = stats.success + stats.error;
+                            const successRate = total > 0 ? (stats.success / total) * 100 : 0;
+                            return (
+                                <div key={action} className="grid grid-cols-3 gap-1 items-center">
+                                    <span className="text-gray-400 truncate">{action.replace(/_/g, ' ')}</span>
+                                    <div className="col-span-2 bg-gray-700 rounded-full h-4">
+                                         <div className="bg-green-500 h-4 rounded-full text-center text-black font-bold" style={{ width: `${successRate}%` }}>
+                                            {stats.success}/{total}
+                                         </div>
+                                    </div>
+                                </div>
+                            )
+                        }) : <p className="text-gray-500">No action data yet.</p>}
+                    </div>
                 </div>
             </div>
 
             <div ref={logContainerRef} className="flex-grow bg-gray-900 rounded-lg p-4 border border-gray-800 overflow-y-auto flex flex-col-reverse gap-4">
-                {log.map(message => <LogEntry key={message.id} message={message} />)}
+                {log.map(message => <LogEntry key={message.id} message={message} onNodeLinkClick={onNodeLinkClick} />)}
             </div>
             <div className="mt-4">
                 <form ref={formRef} onSubmit={handleSubmit} className="flex gap-2">
