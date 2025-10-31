@@ -134,7 +134,7 @@ const LogEntry: React.FC<{ message: LogMessage, onNodeLinkClick: (nodeId: string
 const WatchAiTab: React.FC<WatchAiTabProps> = ({ log, onUserIntervention, agentStatus, tasks, resumeAgent, pauseAgent, onNodeLinkClick, actionStats }) => {
     const formRef = useRef<HTMLFormElement>(null);
     const logContainerRef = useRef<HTMLDivElement>(null);
-    const isRunning = agentStatus !== 'IDLE' && agentStatus !== 'PAUSED' && agentStatus !== 'ERROR';
+    const isRunning = useMemo(() => !['IDLE', 'PAUSED', 'ERROR'].includes(agentStatus), [agentStatus]);
 
 
     useEffect(() => {

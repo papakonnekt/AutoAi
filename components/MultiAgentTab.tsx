@@ -1,6 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { XIcon, LightBulbIcon } from './icons';
 import * as Prompts from '../prompts';
+import { quotaManager } from '../services/quotaManager';
+import { QUOTA_LIMITS } from '../constants';
+import { AIMode } from '../types';
+import RateLimitDisplay from './RateLimitDisplay';
+
+const AGENT_NAMES = ['PLANNER', 'RESEARCHER', 'PROPOSER', 'CRITIC', 'SYNTHESIZER', 'NUDGER'];
 
 const AgentCard: React.FC<{
     name: string,
@@ -11,8 +17,9 @@ const AgentCard: React.FC<{
     isEnabled?: boolean,
     onToggle?: () => void,
     apiKey: string,
-    onApiKeyChange: (key: string) => void
-}> = ({ name, color, description, children, onPromptClick, isEnabled, onToggle, apiKey, onApiKeyChange }) => (
+    onApiKeyChange: (key: string) => void,
+    usageStats: { rpm: number, rpd: number },
+}> = ({ name, color, description, children, onPromptClick, isEnabled, onToggle, apiKey, onApiKeyChange, usageStats }) => (
   <div className={`bg-gray-850 border-l-4 ${color} p-6 rounded-r-lg rounded-b-lg shadow-md`}>
     <div className="flex justify-between items-start">
         <div>
@@ -39,15 +46,25 @@ const AgentCard: React.FC<{
             )}
         </div>
     </div>
-     <div className="mt-4">
-        <label className="text-xs text-gray-400 font-semibold">Agent-Specific API Key (Optional)</label>
-        <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => onApiKeyChange(e.target.value)}
-            placeholder="Defaults to main API key in Settings"
-            className="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
-        />
+     <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+            <label className="text-xs text-gray-400 font-semibold">Agent-Specific API Key (Optional)</label>
+            <input
+                type="password"
+                value={apiKey}
+                onChange={(e) => onApiKeyChange(e.target.value)}
+                placeholder="Defaults to main API key in Settings"
+                className="mt-1 w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors"
+            />
+        </div>
+        <div className="bg-gray-900/50 p-3 rounded-lg">
+             <RateLimitDisplay 
+                title="Agent API Usage"
+                stats={usageStats}
+                limits={QUOTA_LIMITS[apiKey ? AIMode.PAID : AIMode.FREE]}
+                compact
+            />
+        </div>
     </div>
     {children}
   </div>
@@ -79,10 +96,28 @@ interface MultiAgentTabProps {
     setIsNudgerEnabled: (enabled: boolean) => void;
     agentApiKeys: { [key: string]: string };
     setAgentApiKeys: React.Dispatch<React.SetStateAction<{ [key: string]: string }>>;
+    mainApiKey: string | null;
 }
 
-const MultiAgentTab: React.FC<MultiAgentTabProps> = ({ isCriticEnabled, setIsCriticEnabled, isResearcherEnabled, setIsResearcherEnabled, isNudgerEnabled, setIsNudgerEnabled, agentApiKeys, setAgentApiKeys }) => {
+const MultiAgentTab: React.FC<MultiAgentTabProps> = ({ isCriticEnabled, setIsCriticEnabled, isResearcherEnabled, setIsResearcherEnabled, isNudgerEnabled, setIsNudgerEnabled, agentApiKeys, setAgentApiKeys, mainApiKey }) => {
     const [viewingPrompt, setViewingPrompt] = useState<{ title: string, prompt: string } | null>(null);
+    const [agentUsages, setAgentUsages] = useState<{[key: string]: {rpm: number, rpd: number}}>({});
+
+    useEffect(() => {
+        const interval = setInterval(() => {
+            const newUsages: {[key: string]: {rpm: number, rpd: number}} = {};
+            AGENT_NAMES.forEach(name => {
+                const agentKey = agentApiKeys[name] || null;
+                const effectiveKey = agentKey || mainApiKey;
+                newUsages[name] = quotaManager.getUsageStats(effectiveKey);
+            });
+             // The Critic Team shares one key/quota bucket
+            newUsages['CRITIC_TEAM'] = newUsages['CRITIC'];
+            setAgentUsages(newUsages);
+        }, 2000);
+        return () => clearInterval(interval);
+    }, [agentApiKeys, mainApiKey]);
+
 
     const handleApiKeyChange = (agentName: string, key: string) => {
         setAgentApiKeys(prev => ({...prev, [agentName]: key}));
@@ -109,11 +144,11 @@ const MultiAgentTab: React.FC<MultiAgentTabProps> = ({ isCriticEnabled, setIsCri
       <div className="flex-grow space-y-6">
         
         <div className="space-y-6">
-          <AgentCard name="The Planner" color="border-sky-500" description="The strategist. Decides what to do next by creating and updating the master plan." onPromptClick={() => setViewingPrompt({ title: 'Planner', prompt: agentPrompts['Planner'] })} apiKey={agentApiKeys['PLANNER'] || ''} onApiKeyChange={(k) => handleApiKeyChange('PLANNER', k)} />
+          <AgentCard name="The Planner" color="border-sky-500" description="The strategist. Decides what to do next by creating and updating the master plan." onPromptClick={() => setViewingPrompt({ title: 'Planner', prompt: agentPrompts['Planner'] })} apiKey={agentApiKeys['PLANNER'] || ''} onApiKeyChange={(k) => handleApiKeyChange('PLANNER', k)} usageStats={agentUsages['PLANNER'] || {rpm:0, rpd:0}} />
           
-          <AgentCard name="The Researcher" color="border-blue-500" description="The information gatherer. Uses web search to find information needed for tasks identified by the Planner." onPromptClick={() => setViewingPrompt({ title: 'Researcher', prompt: agentPrompts['Researcher']})} isEnabled={isResearcherEnabled} onToggle={() => setIsResearcherEnabled(!isResearcherEnabled)} apiKey={agentApiKeys['RESEARCHER'] || ''} onApiKeyChange={(k) => handleApiKeyChange('RESEARCHER', k)} />
+          <AgentCard name="The Researcher" color="border-blue-500" description="The information gatherer. Uses web search to find information needed for tasks identified by the Planner." onPromptClick={() => setViewingPrompt({ title: 'Researcher', prompt: agentPrompts['Researcher']})} isEnabled={isResearcherEnabled} onToggle={() => setIsResearcherEnabled(!isResearcherEnabled)} apiKey={agentApiKeys['RESEARCHER'] || ''} onApiKeyChange={(k) => handleApiKeyChange('RESEARCHER', k)} usageStats={agentUsages['RESEARCHER'] || {rpm:0, rpd:0}} />
 
-          <AgentCard name="The Proposer" color="border-yellow-500" description="The software engineer. Takes tasks from the plan and writes the code to implement them." onPromptClick={() => setViewingPrompt({ title: 'Proposer', prompt: agentPrompts['Proposer'] })} apiKey={agentApiKeys['PROPOSER'] || ''} onApiKeyChange={(k) => handleApiKeyChange('PROPOSER', k)} />
+          <AgentCard name="The Proposer" color="border-yellow-500" description="The software engineer. Takes tasks from the plan and writes the code to implement them." onPromptClick={() => setViewingPrompt({ title: 'Proposer', prompt: agentPrompts['Proposer'] })} apiKey={agentApiKeys['PROPOSER'] || ''} onApiKeyChange={(k) => handleApiKeyChange('PROPOSER', k)} usageStats={agentUsages['PROPOSER'] || {rpm:0, rpd:0}} />
 
           <AgentCard
             name="The Critic Team"
@@ -124,6 +159,7 @@ const MultiAgentTab: React.FC<MultiAgentTabProps> = ({ isCriticEnabled, setIsCri
             onToggle={() => setIsCriticEnabled(!isCriticEnabled)}
             apiKey={agentApiKeys['CRITIC'] || ''}
             onApiKeyChange={(k) => handleApiKeyChange('CRITIC', k)}
+            usageStats={agentUsages['CRITIC_TEAM'] || {rpm:0, rpd:0}}
           >
             <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                 <div className="bg-gray-900 p-3 rounded-lg">
@@ -141,9 +177,9 @@ const MultiAgentTab: React.FC<MultiAgentTabProps> = ({ isCriticEnabled, setIsCri
             </div>
           </AgentCard>
 
-          <AgentCard name="The Synthesizer" color="border-emerald-500" description="The lead engineer. Makes the final decision to APPROVE or REJECT a change after reviewing critic feedback." onPromptClick={() => setViewingPrompt({ title: 'Synthesizer', prompt: agentPrompts['Synthesizer'] })} apiKey={agentApiKeys['SYNTHESIZER'] || ''} onApiKeyChange={(k) => handleApiKeyChange('SYNTHESIZER', k)} />
+          <AgentCard name="The Synthesizer" color="border-emerald-500" description="The lead engineer. Makes the final decision to APPROVE or REJECT a change after reviewing critic feedback." onPromptClick={() => setViewingPrompt({ title: 'Synthesizer', prompt: agentPrompts['Synthesizer'] })} apiKey={agentApiKeys['SYNTHESIZER'] || ''} onApiKeyChange={(k) => handleApiKeyChange('SYNTHESIZER', k)} usageStats={agentUsages['SYNTHESIZER'] || {rpm:0, rpd:0}} />
 
-          <AgentCard name="The Nudger" color="border-pink-500" description="The creative catalyst. Periodically suggests a novel 'wildcard' task to the Planner to avoid groupthink." onPromptClick={() => setViewingPrompt({ title: 'Nudger', prompt: agentPrompts['Nudger'] })} isEnabled={isNudgerEnabled} onToggle={() => setIsNudgerEnabled(!isNudgerEnabled)} apiKey={agentApiKeys['NUDGER'] || ''} onApiKeyChange={(k) => handleApiKeyChange('NUDGER', k)}>
+          <AgentCard name="The Nudger" color="border-pink-500" description="The creative catalyst. Periodically suggests a novel 'wildcard' task to the Planner to avoid groupthink." onPromptClick={() => setViewingPrompt({ title: 'Nudger', prompt: agentPrompts['Nudger'] })} isEnabled={isNudgerEnabled} onToggle={() => setIsNudgerEnabled(!isNudgerEnabled)} apiKey={agentApiKeys['NUDGER'] || ''} onApiKeyChange={(k) => handleApiKeyChange('NUDGER', k)} usageStats={agentUsages['NUDGER'] || {rpm:0, rpd:0}}>
               <div className="mt-4 flex items-center gap-2 text-pink-300 text-xs p-3 bg-gray-900/50 rounded-lg">
                 <LightBulbIcon className="w-5 h-5 flex-shrink-0" />
                 <p>When enabled, the Nudger will activate every 5 cycles to suggest a new idea to the Planner.</p>

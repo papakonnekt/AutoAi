@@ -2,6 +2,7 @@ import { GoogleGenAI, GenerateContentResponse, Chat } from '@google/genai';
 import { AI_MODEL_PRO, AI_MODEL_FLASH } from '../constants';
 import { LogMessage, AIMode, LearnedMemory, CriticRole, CriticFeedback } from '../types';
 import { PLANNER_PROMPT, PROPOSER_PROMPT, CRITIC_PROMPT, SYNTHESIZER_PROMPT, RESEARCHER_PROMPT, NUDGER_PROMPT } from '../prompts';
+import { quotaManager } from './quotaManager';
 
 
 const getApiKey = (userApiKey: string | null): string => {
@@ -9,12 +10,19 @@ const getApiKey = (userApiKey: string | null): string => {
 };
 
 const callGenerativeAI = async (
-    apiKey: string | null,
+    activeApiKey: string | null,
     modelName: string,
     prompt: string,
     useSearch: boolean = false
 ): Promise<GenerateContentResponse> => {
-    const ai = new GoogleGenAI({ apiKey: getApiKey(apiKey) });
+    const mode = activeApiKey ? AIMode.PAID : AIMode.FREE;
+    
+    const quotaCheck = quotaManager.checkQuota(mode, activeApiKey);
+    if (!quotaCheck.allowed) {
+        throw new Error(`Quota limit hit: ${quotaCheck.reason}`);
+    }
+
+    const ai = new GoogleGenAI({ apiKey: getApiKey(activeApiKey) });
     const thinkingBudget = modelName === AI_MODEL_PRO ? 32768 : 24576;
 
     const response = await ai.models.generateContent({
@@ -25,6 +33,8 @@ const callGenerativeAI = async (
             thinkingConfig: { thinkingBudget }
         }
     });
+    
+    quotaManager.recordCall(activeApiKey);
 
     return response;
 };
@@ -32,22 +42,25 @@ const callGenerativeAI = async (
 
 export const runPlannerAgent = async (
     agentApiKey: string | null,
+    mainApiKey: string | null,
     aiMode: AIMode,
     history: LogMessage[],
     learnedMemories: LearnedMemory[],
     currentPlan: string,
     coreDirective: string,
 ): Promise<GenerateContentResponse> => {
+    const activeKey = aiMode === AIMode.PAID ? (agentApiKey || mainApiKey) : null;
     const modelName = aiMode === AIMode.PAID ? AI_MODEL_PRO : AI_MODEL_FLASH;
     const historyStr = history.map(msg => `[${msg.author}] ${msg.content}`).join('\n');
     const memoriesStr = learnedMemories.map(mem => `- [${mem.type}] CONTEXT: ${mem.context} | OUTCOME: ${mem.outcome} | LEARNING: ${mem.learning}`).join('\n');
     const prompt = PLANNER_PROMPT(coreDirective, currentPlan, historyStr, memoriesStr);
-    return callGenerativeAI(agentApiKey, modelName, prompt);
+    return callGenerativeAI(activeKey, modelName, prompt);
 };
 
 
 export const runProposerAgent = async (
   agentApiKey: string | null,
+  mainApiKey: string | null,
   aiMode: AIMode,
   history: LogMessage[],
   learnedMemories: LearnedMemory[],
@@ -55,6 +68,7 @@ export const runProposerAgent = async (
   currentPlan: string,
   rejectionFeedback?: string | null
 ): Promise<GenerateContentResponse> => {
+    const activeKey = aiMode === AIMode.PAID ? (agentApiKey || mainApiKey) : null;
     const modelName = aiMode === AIMode.PAID ? AI_MODEL_PRO : AI_MODEL_FLASH;
 
     const searchConstraint = consecutiveSearches >= 3 
@@ -73,16 +87,18 @@ export const runProposerAgent = async (
     const memoriesStr = learnedMemories.map(mem => `- [${mem.type}] CONTEXT: ${mem.context} | OUTCOME: ${mem.outcome} | LEARNING: ${mem.learning}`).join('\n');
     const prompt = PROPOSER_PROMPT(currentPlan, searchConstraint, feedbackBlock, memoriesStr, historyStr);
     
-    return callGenerativeAI(agentApiKey, modelName, prompt, true);
+    return callGenerativeAI(activeKey, modelName, prompt, true);
 };
 
 
 export const runCriticAgent = async (
     agentApiKey: string | null,
+    mainApiKey: string | null,
     aiMode: AIMode,
     role: CriticRole,
     proposedChange: string,
 ): Promise<GenerateContentResponse> => {
+    const activeKey = aiMode === AIMode.PAID ? (agentApiKey || mainApiKey) : null;
     const modelName = AI_MODEL_FLASH; // Critics can be faster models
 
     const prompts = {
@@ -101,15 +117,17 @@ export const runCriticAgent = async (
     };
 
     const prompt = CRITIC_PROMPT(role, prompts, proposedChange);
-    return callGenerativeAI(agentApiKey, modelName, prompt);
+    return callGenerativeAI(activeKey, modelName, prompt);
 };
 
 export const runSynthesizerAgent = async (
     agentApiKey: string | null,
+    mainApiKey: string | null,
     aiMode: AIMode,
     proposedChange: string,
     criticisms: CriticFeedback[]
 ): Promise<GenerateContentResponse> => {
+    const activeKey = aiMode === AIMode.PAID ? (agentApiKey || mainApiKey) : null;
     const modelName = aiMode === AIMode.PAID ? AI_MODEL_PRO : AI_MODEL_FLASH;
     const criticismsStr = criticisms.map(c => `
       - **${c.role} Critic Score:** ${c.score}/10
@@ -117,29 +135,33 @@ export const runSynthesizerAgent = async (
       `).join('');
     
     const prompt = SYNTHESIZER_PROMPT(proposedChange, criticismsStr);
-    return callGenerativeAI(agentApiKey, modelName, prompt);
+    return callGenerativeAI(activeKey, modelName, prompt);
 };
 
 export const runResearcherAgent = async (
     agentApiKey: string | null,
+    mainApiKey: string | null,
     aiMode: AIMode,
     task: string,
     history: LogMessage[]
 ): Promise<GenerateContentResponse> => {
+    const activeKey = aiMode === AIMode.PAID ? (agentApiKey || mainApiKey) : null;
     const modelName = AI_MODEL_FLASH; // Researcher can be a faster model
     const historyStr = history.map(msg => `[${msg.author}] ${msg.content}`).join('\n');
     const prompt = RESEARCHER_PROMPT(task, historyStr);
-    return callGenerativeAI(agentApiKey, modelName, prompt, true);
+    return callGenerativeAI(activeKey, modelName, prompt, true);
 };
 
 export const runNudgerAgent = async (
     agentApiKey: string | null,
+    mainApiKey: string | null,
     aiMode: AIMode,
     currentPlan: string
 ): Promise<GenerateContentResponse> => {
+    const activeKey = aiMode === AIMode.PAID ? (agentApiKey || mainApiKey) : null;
     const modelName = AI_MODEL_FLASH;
     const prompt = NUDGER_PROMPT(currentPlan);
-    return callGenerativeAI(agentApiKey, modelName, prompt);
+    return callGenerativeAI(activeKey, modelName, prompt);
 };
 
 

@@ -12,6 +12,7 @@ import LivePreviewTab from './components/LivePreviewTab';
 import TutorialsTab from './components/TutorialsTab';
 import MultiAgentTab from './components/MultiAgentTab';
 import AgentStatusLed from './components/AgentStatusLed';
+import HeaderRateLimitTracker from './components/HeaderRateLimitTracker';
 import { EyeIcon, CodeIcon, CogIcon, DocumentDuplicateIcon, DesktopComputerIcon, BookOpenIcon, UsersIcon } from './components/icons';
 
 // Allow using Babel for in-browser transpilation check
@@ -29,6 +30,8 @@ const ALL_FILES = [
     '/components/TutorialsTab.tsx',
     '/components/MultiAgentTab.tsx',
     '/components/AgentStatusLed.tsx',
+    '/components/HeaderRateLimitTracker.tsx',
+    '/components/RateLimitDisplay.tsx',
     '/constants.ts',
     '/hooks/useLocalStorage.ts',
     '/index.html',
@@ -419,16 +422,7 @@ const App: React.FC = () => {
     const runMainAILoop = useCallback(async () => {
         if (['IDLE', 'PAUSED', 'ERROR'].includes(agentStatusRef.current)) return;
 
-        setCurrentTask('Checking API quota...');
-        const quotaCheck = quotaManager.checkQuota(aiMode);
-        if (!quotaCheck.allowed) {
-            const retryDelay = 10000;
-            const retryMsg = `Quota limit hit: ${quotaCheck.reason}. Retrying in ${retryDelay / 1000} seconds...`;
-            addLogMessage(LogMessageAuthor.SYSTEM, retryMsg);
-            setCurrentTask(retryMsg);
-            agentLoopTimeout.current = window.setTimeout(runMainAILoop, retryDelay);
-            return;
-        }
+        // No quota check here; it's handled inside callGenerativeAI
 
         try {
             switch (agentStatusRef.current) {
@@ -436,8 +430,8 @@ const App: React.FC = () => {
                     if (isNudgerEnabled && mainLoopCycle > 0 && mainLoopCycle % 5 === 0) {
                         setCurrentTask('Nudger: Thinking of a creative suggestion...');
                         const currentPlan = vfsRef.current['/agent/plan.md'] || "";
-                        const nudgerApiKey = agentApiKeys['NUDGER'] || apiKey;
-                        const response = await runNudgerAgent(nudgerApiKey, aiMode, currentPlan);
+                        const nudgerApiKey = agentApiKeys['NUDGER'] || null;
+                        const response = await runNudgerAgent(nudgerApiKey, apiKey, aiMode, currentPlan);
                         const text = response.text;
                         const thoughtMatch = text.match(/\[THOUGHT\]\s*([\s\S]*?)\s*\[\/THOUGHT\]/);
                         const actionMatch = text.match(/\[ACTION\]\s*([\s\S]*?)(?:\[\/ACTION\]|$)/);
@@ -450,9 +444,9 @@ const App: React.FC = () => {
                     setCurrentTask('Planner: Analyzing goals and creating a new plan...');
                     const coreDirective = vfsRef.current['/upgrades.md'];
                     const currentPlan = vfsRef.current['/agent/plan.md'] || "No plan file found.";
-                    const plannerApiKey = agentApiKeys['PLANNER'] || apiKey;
+                    const plannerApiKey = agentApiKeys['PLANNER'] || null;
                     
-                    const response = await runPlannerAgent(plannerApiKey, aiMode, logRef.current.slice(0, 50), learnedMemoriesRef.current, currentPlan, coreDirective);
+                    const response = await runPlannerAgent(plannerApiKey, apiKey, aiMode, logRef.current.slice(0, 50), learnedMemoriesRef.current, currentPlan, coreDirective);
                     
                     const text = response.text;
                     const thoughtMatch = text.match(/\[THOUGHT\]\s*([\s\S]*?)\s*\[\/THOUGHT\]/);
@@ -489,8 +483,8 @@ const App: React.FC = () => {
                     }
                     
                     setCurrentTask(`Researcher: Researching "${researchTask.substring(0, 50)}..."`);
-                    const researcherApiKey = agentApiKeys['RESEARCHER'] || apiKey;
-                    const response = await runResearcherAgent(researcherApiKey, aiMode, researchTask, logRef.current.slice(0, 20));
+                    const researcherApiKey = agentApiKeys['RESEARCHER'] || null;
+                    const response = await runResearcherAgent(researcherApiKey, apiKey, aiMode, researchTask, logRef.current.slice(0, 20));
                     const text = response.text;
                     const thoughtMatch = text.match(/\[THOUGHT\]\s*([\s\S]*?)\s*\[\/THOUGHT\]/);
                     const actionMatch = text.match(/\[ACTION\]\s*([\s\S]*?)(?:\[\/ACTION\]|$)/);
@@ -511,9 +505,9 @@ const App: React.FC = () => {
                 case 'PROPOSING': {
                     setCurrentTask('Proposer: Developing a code change for the current task...');
                     const currentPlan = vfsRef.current['/agent/plan.md'] || "";
-                    const proposerApiKey = agentApiKeys['PROPOSER'] || apiKey;
+                    const proposerApiKey = agentApiKeys['PROPOSER'] || null;
                     
-                    const response = await runProposerAgent(proposerApiKey, aiMode, logRef.current.slice(0, 100), learnedMemoriesRef.current, consecutiveSearches, currentPlan, synthesizerRejection);
+                    const response = await runProposerAgent(proposerApiKey, apiKey, aiMode, logRef.current.slice(0, 100), learnedMemoriesRef.current, consecutiveSearches, currentPlan, synthesizerRejection);
                     
                     setSynthesizerRejection(null); // Clear rejection feedback after using it
                     const text = response.text;
@@ -560,9 +554,9 @@ const App: React.FC = () => {
                         return;
                     }
                     setCurrentTask('Critic Team: Reviewing proposed code change...');
-                    const criticApiKey = agentApiKeys['CRITIC'] || apiKey;
+                    const criticApiKey = agentApiKeys['CRITIC'] || null;
                     const roles: CriticRole[] = ['Security', 'Efficiency', 'Clarity'];
-                    const criticismPromises = roles.map(role => runCriticAgent(criticApiKey, aiMode, role, proposedChange.action));
+                    const criticismPromises = roles.map(role => runCriticAgent(criticApiKey, apiKey, aiMode, role, proposedChange.action));
 
                     const results = await Promise.all(criticismPromises);
                     
@@ -592,9 +586,9 @@ const App: React.FC = () => {
                         return;
                     }
                     setCurrentTask('Synthesizer: Analyzing feedback and making a final decision...');
-                    const synthesizerApiKey = agentApiKeys['SYNTHESIZER'] || apiKey;
+                    const synthesizerApiKey = agentApiKeys['SYNTHESIZER'] || null;
                     
-                    const response = await runSynthesizerAgent(synthesizerApiKey, aiMode, proposedChange.action, criticFeedbacks);
+                    const response = await runSynthesizerAgent(synthesizerApiKey, apiKey, aiMode, proposedChange.action, criticFeedbacks);
                     const text = response.text;
                     
                     const decisionMatch = text.match(/\[DECISION\]\s*(APPROVE|REJECT)\s*\[\/DECISION\]/);
@@ -637,13 +631,20 @@ const App: React.FC = () => {
             }
         } catch (error: any) {
             console.error("AI loop error:", error);
-            const errorMsg = `Error from API: ${error.message}. Check your API key or billing.`;
+            const errorMsg = `Error from API: ${error.message}.`;
             addLogMessage(LogMessageAuthor.SYSTEM, errorMsg);
-            logLearnedMemory('ERROR', 'General API call', errorMsg, 'API errors can be caused by invalid keys, billing issues, or network problems. Verify settings.');
-            setAgentStatus('ERROR');
-            setCurrentTask(`Agent paused due to an API error.`);
+            
+            if (error.message.includes('Quota')) {
+                const retryDelay = 10000;
+                 addLogMessage(LogMessageAuthor.SYSTEM, `Retrying in ${retryDelay / 1000} seconds...`);
+                 agentLoopTimeout.current = window.setTimeout(runMainAILoop, retryDelay);
+            } else {
+                 logLearnedMemory('ERROR', 'General API call', errorMsg, 'API errors can be caused by invalid keys, billing issues, or network problems. Verify settings.');
+                 setAgentStatus('ERROR');
+                 setCurrentTask(`Agent paused due to an API error.`);
+            }
         }
-    }, [aiMode, apiKey, addLogMessage, consecutiveSearches, executeAction, logLearnedMemory, setCurrentTasks, proposedChange, criticFeedbacks, synthesizerRejection, setSynthesizerRejection, isCriticEnabled, isNudgerEnabled, isResearcherEnabled, mainLoopCycle, setMainLoopCycle, agentApiKeys]);
+    }, [aiMode, apiKey, addLogMessage, consecutiveSearches, executeAction, logLearnedMemory, proposedChange, criticFeedbacks, synthesizerRejection, setSynthesizerRejection, isCriticEnabled, isNudgerEnabled, isResearcherEnabled, mainLoopCycle, setMainLoopCycle, agentApiKeys]);
     
     useEffect(() => {
         if (!['IDLE', 'PAUSED', 'ERROR'].includes(agentStatus)) {
@@ -836,6 +837,7 @@ Phase 1: Self-Awareness & Core Improvement
                             setIsNudgerEnabled={setIsNudgerEnabled}
                             agentApiKeys={agentApiKeys}
                             setAgentApiKeys={setAgentApiKeys}
+                            mainApiKey={apiKey}
                         />;
             case 'tutorials':
                  return <TutorialsTab />;
@@ -886,10 +888,8 @@ Phase 1: Self-Awareness & Core Improvement
                         <TabButton id="settings" label="Settings" icon={<CogIcon className="w-5 h-5" />} />
                     </nav>
                      <div className="text-sm text-gray-400 hidden md:flex items-center gap-4">
+                        <HeaderRateLimitTracker apiKey={apiKey} aiMode={aiMode} />
                         <AgentStatusLed currentStatus={agentStatus} />
-                        <div className="hidden lg:block">
-                            <strong>AI Status:</strong> <span className="italic text-indigo-300">{['IDLE', 'PAUSED', 'ERROR'].includes(agentStatus) ? agentStatus : primaryTask}</span>
-                        </div>
                     </div>
                 </div>
             </header>

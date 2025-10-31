@@ -3,6 +3,7 @@ import { AIMode } from '../types';
 import { validateApiKey } from '../services/geminiService';
 import { quotaManager } from '../services/quotaManager';
 import { QUOTA_LIMITS } from '../constants';
+import RateLimitDisplay from './RateLimitDisplay';
 
 
 interface SettingsTabProps {
@@ -16,49 +17,28 @@ interface SettingsTabProps {
 
 type ValidationStatus = 'idle' | 'validating' | 'valid' | 'invalid';
 
-const QuotaBar: React.FC<{
-    label: string;
-    value: number;
-    limit: number;
-}> = ({ label, value, limit }) => {
-    const percentage = limit === Infinity ? 0 : Math.min((value / limit) * 100, 100);
-    const isApproaching = percentage > 75;
-    const isExceeded = percentage >= 100;
-    let barColor = 'bg-indigo-500';
-    if(isExceeded) barColor = 'bg-red-500';
-    else if(isApproaching) barColor = 'bg-yellow-500';
-
-    return (
-        <div>
-            <div className="flex justify-between text-xs text-gray-400 mb-1">
-                <span>{label}</span>
-                <span>{value} / {limit === Infinity ? '∞' : limit}</span>
-            </div>
-            <div className="w-full bg-gray-700 rounded-full h-2.5">
-                <div className={`${barColor} h-2.5 rounded-full`} style={{ width: `${percentage}%` }}></div>
-            </div>
-        </div>
-    );
-};
-
 const SettingsTab: React.FC<SettingsTabProps> = ({ apiKey, setApiKey, aiMode, setAiMode, isAutonomous, setIsAutonomous }) => {
   const [keyInput, setKeyInput] = useState(apiKey || '');
   const [validationStatus, setValidationStatus] = useState<ValidationStatus>('idle');
   const [validationMessage, setValidationMessage] = useState<string>('');
-  const [usage, setUsage] = useState({ rpm: 0, tpm: 0, rpd: 0 });
+  const [usage, setUsage] = useState({ rpm: 0, rpd: 0 });
+
+  const keyToTrack = aiMode === AIMode.PAID ? apiKey : null;
+  const limits = QUOTA_LIMITS[aiMode];
+
+  useEffect(() => {
+     const interval = setInterval(() => {
+        setUsage(quotaManager.getUsageStats(keyToTrack));
+     }, 2000); // Poll every 2 seconds
+     return () => clearInterval(interval);
+  }, [keyToTrack]);
+
 
   // Reset validation status if the user types a new key
   useEffect(() => {
     setValidationStatus('idle');
     setValidationMessage('');
   }, [keyInput]);
-
-  useEffect(() => {
-     const interval = setInterval(() => {
-        setUsage(quotaManager.getUsageStats());
-     }, 1000);
-     return () => clearInterval(interval);
-  }, []);
 
   const handleValidateKey = async () => {
     const trimmedKey = keyInput.trim();
@@ -192,14 +172,15 @@ const SettingsTab: React.FC<SettingsTabProps> = ({ apiKey, setApiKey, aiMode, se
             />
           </button>
         </div>
-        {aiMode === AIMode.FREE && (
-             <div className="bg-gray-850 p-4 rounded-lg space-y-3">
-                <h4 className="text-sm font-semibold text-white">Free Mode Quota Usage (Last Minute)</h4>
-                <QuotaBar label="Requests (RPM)" value={usage.rpm} limit={QUOTA_LIMITS[AIMode.FREE].RPM} />
-                <QuotaBar label="Tokens (TPM)" value={usage.tpm} limit={QUOTA_LIMITS[AIMode.FREE].TPM} />
-                <QuotaBar label="Daily Requests (RPD)" value={usage.rpd} limit={QUOTA_LIMITS[AIMode.FREE].RPD} />
-             </div>
-        )}
+        
+        <div className="bg-gray-850 p-4 rounded-lg space-y-3">
+            <RateLimitDisplay 
+                title={`${aiMode} Mode Quota Usage`}
+                stats={usage}
+                limits={limits}
+            />
+        </div>
+
         {!apiKey && <p className="text-sm text-yellow-500">You must save an API key to enable Paid Mode.</p>}
 
          <div className="bg-gray-850 p-4 rounded-lg flex items-center justify-between">
