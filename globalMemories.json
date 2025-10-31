@@ -1,0 +1,39 @@
+
+[
+  {
+    "id": "global-err-001",
+    "timestamp": "2024-01-01T10:00:00Z",
+    "type": "ERROR",
+    "context": "Making initial API call in FREE mode.",
+    "outcome": "Received quota violation: RPM limit exceeded.",
+    "learning": "The FREE mode has a very low RPM limit (2). Operations must be spaced out or the agent must be switched to PAID mode to function effectively.",
+    "agentVersion": 1
+  },
+  {
+    "id": "global-succ-001",
+    "timestamp": "2024-01-01T11:00:00Z",
+    "type": "SUCCESS",
+    "context": "Attempting to list files using LIST_FILES action.",
+    "outcome": "Successfully received a list of all files in the virtual file system.",
+    "learning": "The LIST_FILES action is a reliable way to explore the project structure and does not have a high token cost.",
+    "agentVersion": 2
+  },
+  {
+    "id": "global-err-002",
+    "timestamp": "2024-01-02T14:00:00Z",
+    "type": "ERROR",
+    "context": "Attempting to REWRITE_CODE for a non-existent file '/components/FakeComponent.tsx'.",
+    "outcome": "Action failed with 'File does not exist' error from the system.",
+    "learning": "Always verify a file exists with LIST_FILES before attempting to read or rewrite it. The system enforces file path validity.",
+    "agentVersion": 5
+  },
+  {
+    "id": "global-insight-001",
+    "timestamp": "2024-01-03T09:30:00Z",
+    "type": "INSIGHT",
+    "context": "Performing multiple GOOGLE_SEARCH actions in a row.",
+    "outcome": "The system imposes a hard limit of 3 consecutive searches before a file action is required.",
+    "learning": "A strategy of searching, reading, and then coding is more effective than searching repeatedly. The system forces this pattern.",
+    "agentVersion": 8
+  }
+]

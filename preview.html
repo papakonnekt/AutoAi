@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Preview</title>
+    <!-- 1. Babel for on-the-fly transpilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body { margin: 0; background-color: #0b0f1a; color: #e5e7eb; font-family: sans-serif; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <!-- 2. Bootloader Script -->
+    <script type="module">
+        // Import libraries that the sandboxed code will need.
+        // This makes them available for our custom require function.
+        import React from 'https://aistudiocdn.com/react@^19.2.0';
+        import ReactDOM from 'https://aistudiocdn.com/react-dom@^19.2.0/client';
+        import * as d3 from 'https://aistudiocdn.com/d3@^7.9.0';
+        import { GoogleGenAI } from 'https://aistudiocdn.com/@google/genai@^1.28.0';
+
+        const libraries = {
+            'react': React,
+            'react-dom/client': ReactDOM,
+            'd3': d3,
+            '@google/genai': { GoogleGenAI }
+        };
+
+        let vfs = {};
+        const transpiledCache = {};
+        const moduleCache = {};
+
+        function customRequire(path, currentFilePath) {
+            // Check for library first
+            if (libraries[path]) {
+                return libraries[path];
+            }
+
+            let resolvedPath = path;
+            if (path.startsWith('./') || path.startsWith('../')) {
+                // Resolve relative paths based on the current file's path
+                const newUrl = new URL(path, `file://${currentFilePath}`);
+                resolvedPath = newUrl.pathname;
+                
+                // Handle extension-less imports by probing for available extensions
+                if (!vfs[resolvedPath]) {
+                    if (vfs[resolvedPath + '.ts']) {
+                        resolvedPath = resolvedPath + '.ts';
+                    } else if (vfs[resolvedPath + '.tsx']) {
+                        resolvedPath = resolvedPath + '.tsx';
+                    }
+                }
+            }
+
+
+            // Check if module is already loaded
+            if (moduleCache[resolvedPath]) {
+                return moduleCache[resolvedPath].exports;
+            }
+
+            // Get file content from Virtual File System
+            const fileContent = vfs[resolvedPath];
+            if (fileContent === undefined) {
+                throw new Error(`Module not found: Can't resolve '${path}' from '${currentFilePath}'`);
+            }
+            
+            // Transpile with Babel if not already in cache
+            if (!transpiledCache[resolvedPath]) {
+                try {
+                    const babelResult = Babel.transform(fileContent, {
+                        presets: ['react', 'typescript'],
+                        filename: resolvedPath // Important for Babel to know it's .tsx
+                    }).code;
+                    transpiledCache[resolvedPath] = babelResult;
+                } catch (e) {
+                    console.error(`Babel transpilation failed for ${resolvedPath}:`, e);
+                    throw e;
+                }
+            }
+            
+            const transpiledCode = transpiledCache[resolvedPath];
+            
+            // Simulate CommonJS environment
+            const module = { exports: {} };
+            moduleCache[resolvedPath] = module;
+
+            const requireForModule = (importPath) => customRequire(importPath, resolvedPath);
+
+            try {
+                // Create a function that will execute the code with the correct scope
+                const factory = new Function('require', 'module', 'exports', transpiledCode);
+                factory(requireForModule, module, module.exports);
+            } catch (e) {
+                console.error(`Error executing module ${resolvedPath}:`, e);
+                delete moduleCache[resolvedPath];
+                throw e;
+            }
+            
+            return module.exports;
+        }
+
+        window.addEventListener('message', (event) => {
+            if (event.data.type === 'LOAD_VFS') {
+                vfs = event.data.vfs;
+                
+                // Clear state from previous run
+                Object.keys(transpiledCache).forEach(key => delete transpiledCache[key]);
+                Object.keys(moduleCache).forEach(key => delete moduleCache[key]);
+                const rootEl = document.getElementById('root');
+                if (rootEl) rootEl.innerHTML = '';
+
+                console.log('[Preview] VFS received, booting application...');
+                
+                window.process = { env: { NODE_ENV: 'development', API_KEY: 'sandboxed-key' } };
+
+                try {
+                    // Start the application by requiring the entry point
+                    customRequire('/index.tsx', '/');
+                    console.log('[Preview] Boot process finished successfully.');
+                } catch (error) {
+                    console.error('[Preview] Error during app execution:', error);
+                    const rootEl = document.getElementById('root');
+                    if(rootEl) {
+                        rootEl.innerHTML = `<div style="color: #fca5a5; padding: 20px; font-family: monospace; white-space: pre-wrap; font-size: 14px;">
+                            <strong style="font-size: 16px; color: #ef4444;">Live Preview Error:</strong><br/><br/>
+                            ${error.stack || error.message}
+                        </div>`;
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

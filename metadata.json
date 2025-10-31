@@ -1,0 +1,5 @@
+{
+  "name": "Autonomous AI Agent Environment",
+  "description": "A configurable web application that serves as an environment for a self-improving AI agent. The user can observe the agent, intervene, and switch between a limited 'Free Mode' and a high-limit 'Paid Mode' using their own API key.",
+  "requestFramePermissions": []
+}
